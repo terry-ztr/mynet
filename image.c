@@ -161,6 +161,7 @@ image load_image_color(char *filename, int w, int h)
 
 image load_image(char *filename, int width, int height, int channels)
 {
+    fprintf(stderr, "Loading image from %s...\n", filename);
     int w, h, c;
     unsigned char *data = stbi_load(filename, &w, &h, &c, channels);
     if (data == NULL)
@@ -233,6 +234,7 @@ void draw_detections(image im, detection *dets, int num, float thresh, char **na
     int i,j;
     for(i = 0; i < num; ++i){
         int class = -1;
+        // fprintf(stderr, "printing identified object\n");
         for(j = 0; j < classes; ++j){
             if (dets[i].prob[j] > thresh){
                 if (class < 0) {

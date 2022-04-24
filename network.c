@@ -5,7 +5,11 @@
 #include "mynet.h"
 
 #define LAYERNUM 16
-#define FLT_MAX  10
+#define FLT_MAX  10000
+
+#define QUANTIZE 0
+#define PRINT_WEIGHT 0
+#define PRINT_BNM 0
 
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image)
 {
@@ -58,6 +62,7 @@ void add_bias(float *output, float *biases, int out_channel, int size_out)
 
 void forward_batchnorm(float *output, float *rolling_mean, float *rolling_variance, int out_channel, int size_out)
 {
+    fprintf(stderr, "doing forward batchnorm\n");
     for (int oc = 0; oc < out_channel; ++oc)
     {
         int channel_offset = oc * size_out * size_out;
@@ -103,6 +108,7 @@ void activate_array(float *output, int array_len, ACTIVATION a)
 
 void forward_max_layer(layer l, network net)
 {
+    fprintf(stderr, "doing forward maxpool\n");
     int size_out = l.size_out;
     int input_channel = l.c;
     int filter_size = l.size;
@@ -175,6 +181,8 @@ void softmax_cpu(float *input, int n, int batch, int batch_offset, int groups, i
 
 void forward_region_layer(layer l, network net)
 {
+    fprintf(stderr, "doing forward region");
+
     int index;
     int size_in = l.size_in;
 
@@ -202,6 +210,7 @@ void forward_conv_layer(layer l, network net)
         fprintf(stderr, "non conv layer calls forward_conv_layer\n");
         exit(1);
     }
+    fprintf(stderr, "doing forward conv...\n");
 
     int pad = l.pad;
     // int stride = l.stride;
@@ -229,8 +238,8 @@ void forward_conv_layer(layer l, network net)
     // for each output channel
     for (int oc = 0; oc < output_channel; ++oc)
     {
-        output_channel_offset_kernel = oc * ksize * ksize * output_channel;
-        output_channel_offset_out = oc * output_size * output_size * output_channel;
+        output_channel_offset_kernel = oc * ksize * ksize * input_channel;
+        output_channel_offset_out = oc * output_size * output_size;
         // for each input channel
         for (int ic = 0; ic < input_channel; ++ic)
         {
@@ -255,11 +264,13 @@ void forward_conv_layer(layer l, network net)
                                                          row_offset_kernel +
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
+                            
                             // get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image)
                             float image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, input);
                             out[col_offset_out +
                                 row_offset_out +
                                 output_channel_offset_out] += (kernel_value * image_value);
+                            //fprintf(stderr, "       update output value\n");
                             // out += w * get_input_pixel
                         }
                     }
@@ -388,16 +399,103 @@ void free_maxpool_layer(layer *l)
 
 void load_conv_weights(layer *l, FILE *fp)
 {
-    int num = l->c * l->n * l->size * l->size;
+    FILE *out_fp;
+    FILE *bnm_fp;
+    FILE *bias_fp;
 
+    if (PRINT_WEIGHT)
+    {
+        if (QUANTIZE)
+            out_fp = fopen("mynet_quant_weight.txt", "a");
+        else
+        {
+            out_fp = fopen("mynet_yolov2_tiny_voc_weight_23.txt", "a");
+            bias_fp = fopen("mynet_bias_23.txt", "a");
+        }
+    }
+
+    if (PRINT_BNM)
+        bnm_fp = fopen("mynet_batch_norm_23.txt", "a");
+
+
+    int num = l->c * l->n * l->size * l->size;
+    
     fread(l->biases, sizeof(float), l->n, fp);
-    fread(l->weights, sizeof(float), num, fp);
+    if (PRINT_WEIGHT)
+    {
+        int k;
+        fprintf(bias_fp, "\n");
+        fprintf(bias_fp, " bias: %d\n", num);
+        for (k = 0; k < l->n; ++k)
+        {
+            fprintf(bias_fp, "%g, ", l->biases[k]);
+            if (k % 10 == 9)
+                fprintf(bias_fp, "\n");
+        }
+        fprintf(bias_fp, "\n\n");
+    }
+
+
     if (l->batch_normalize)
     {
         fread(l->scales, sizeof(float), l->n, fp);
         fread(l->rolling_mean, sizeof(float), l->n, fp);
         fread(l->rolling_variance, sizeof(float), l->n, fp);
+
+        if (PRINT_BNM)
+        {
+            int i;
+            fprintf(bnm_fp, "scale: %d\n", l->n);
+            for (i = 0; i < l->n; ++i)
+            {
+                fprintf(bnm_fp, "%g, ", l->scales[i]);
+                if (i % 10 == 9)
+                    fprintf(bnm_fp, "\n");
+            }
+            fprintf(bnm_fp, "\n\n");
+
+            fprintf(bnm_fp, "rolling_mean: %d\n", l->n);
+            for (i = 0; i < l->n; ++i)
+            {
+                fprintf(bnm_fp, "%g, ", l->rolling_mean[i]);
+                if (i % 10 == 9)
+                    fprintf(bnm_fp, "\n");
+            }
+            fprintf(bnm_fp, "\n\n");
+
+            fprintf(bnm_fp, "rolling_var: %d\n", l->n);
+            for (i = 0; i < l->n; ++i)
+            {
+                fprintf(bnm_fp, "%g, ", l->rolling_variance[i]);
+                if (i % 10 == 9)
+                    fprintf(bnm_fp, "\n");
+            }
+            fprintf(bnm_fp, "\n\n");
+        }
     }
+
+    fread(l->weights, sizeof(float), num, fp);
+    if (PRINT_WEIGHT)
+    {
+        int k;
+        fprintf(out_fp, "conv weights: %d\n", num);
+        for (k = 0; k < num; ++k)
+        {
+            fprintf(out_fp, "%g, ", l->weights[k]);
+            if (k % 10 == 9)
+                fprintf(out_fp, "\n");
+        }
+        fprintf(out_fp, "\n\n");
+    }
+
+    if (PRINT_WEIGHT){
+        fclose(out_fp);
+        fclose(bias_fp);
+    }
+
+    if (PRINT_BNM)
+        fclose(bnm_fp);
+
 }
 
 void load_connected_weights(layer *l, FILE *fp)
@@ -430,9 +528,13 @@ void load_weights(network *net, char *weights)
             fprintf(stderr, "loading connected layer weights\n");
             load_connected_weights(&l, weights_fp);
         }
-        else
+        else if (l.type == MAXPOOL)
         {
-            fprintf(stderr, "load layer weight not implement\n");
+            fprintf(stderr, "no loading needed for maxpool layer\n");
+        }
+        else if (l.type == REGION)
+        {
+            fprintf(stderr, "no loading needed for region layer\n");
         }
     }
 }

@@ -6,7 +6,8 @@
 
 #define INT_MAX  2147483647
 
-#define PRINT_WEIGHTS 1
+#define PRINT_WEIGHTS 0
+#define PRINT_OUTPUT 1
 
 char *fgetl(FILE *fp)
 {
@@ -150,9 +151,14 @@ int main(int argc, char **argv)
     char *filename = argv[1];
     char *weights_file = "genv2_tiny_voc.weights";
     
-    FILE *check_w_fp = NULL;
+    FILE *check_w_fp;
+    FILE *check_out_fp;
+
     if (PRINT_WEIGHTS)
         check_w_fp = fopen("mynet_weights.txt", "a");
+
+    if (PRINT_OUTPUT)
+        check_out_fp = fopen("mynet_outputs_23.txt", "a");
 
     char *names[20] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus","car", "cat", "chair", "cow", "diningtable", "dog", "horse","motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
     
@@ -203,6 +209,7 @@ int main(int argc, char **argv)
         fclose(check_w_fp);
 
     // load image and resize it to the network input size
+
     image im = load_image(filename, net->width, net->height, net->channels);
     
     net->input = im.data;
@@ -210,10 +217,29 @@ int main(int argc, char **argv)
     for (int i = 0; i < net->n; ++i) {
         net->index = i;
         layer l = net->layers[i];
+        // fprintf(stderr, "forward pass for layer %d...\n", i);
         l.forward(l, *net);
+
         net->input = l.output;
     }
-    float *out = net->input;
+
+    // layer 0 output
+    layer ltmp = net->layers[0];
+    int len = ltmp.size_out*ltmp.size_out*ltmp.n;
+    if (PRINT_OUTPUT){
+        fprintf(check_out_fp, "\n");
+        fprintf(check_out_fp, "layer %d output: %d\n", 0, len);
+        for (int j=0; j<len; ++j){
+            fprintf(check_out_fp, "%g, ", ltmp.output[j]);
+            if (j % 10 == 9)
+                fprintf(check_out_fp, "\n");
+        }
+        fprintf(check_out_fp, "\n\n");
+    }
+
+    if (PRINT_OUTPUT)
+        fclose(check_out_fp);
+ 
 
     float thresh = 0.5;
     float hier_thresh = 0.5;
