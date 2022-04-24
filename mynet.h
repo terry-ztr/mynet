@@ -15,8 +15,27 @@ typedef enum {
 
 typedef enum {
     LINEAR,
-    LEAKY
+    LEAKY,
+    LOGISTIC
 } ACTIVATION;
+
+typedef struct{
+    float x, y, w, h;
+} box;
+
+typedef struct detection{
+    box bbox;
+    int classes;
+    float *prob;
+    float *mask;
+    float objectness;
+    int sort_class;
+} detection;
+
+
+typedef enum{
+    PNG, BMP, TGA, JPG
+} IMTYPE;
 
 struct network;
 typedef struct network network;
@@ -49,6 +68,11 @@ struct layer{
     // space needed for intermidiate calculation in byte
     // size_t workspace_size;
 
+    // region layer
+    int classes;
+    int coords;
+    int num;
+
     float *weights;
     float *biases;
     float *scales;
@@ -70,6 +94,18 @@ typedef struct network{
     float *workspace;
 } network;
 
+typedef struct node{
+    void *val;
+    struct node *next;
+    struct node *prev;
+} node;
+
+typedef struct list{
+    int size;
+    node *front;
+    node *back;
+} list;
+
 image load_image(char *filename, int width, int height, int channels);
 
 void free_image(image im);
@@ -79,3 +115,15 @@ network *make_network();
 void free_network(network *net);
 
 void load_weights(network *net, char *weights);
+
+detection *get_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, int *num);
+
+void draw_detections(image im, detection *dets, int num, float thresh, char **names, image **alphabet, int classes);
+
+void free_detections(detection *dets, int n);
+
+void save_image(image im, const char *name);
+
+image load_image_color(char *filename, int w, int h);
+
+
