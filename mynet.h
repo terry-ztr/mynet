@@ -126,4 +126,6 @@ void save_image(image im, const char *name);
 
 image load_image_color(char *filename, int w, int h);
 
+float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image);
+
 

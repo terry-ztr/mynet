@@ -7,10 +7,7 @@
 #define LAYERNUM 16
 #define FLT_MAX  10000
 
-#define QUANTIZE 0
-#define PRINT_WEIGHT 0
-#define PRINT_BNM 0
-
+// correct
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image)
 {
     int im_col = col - pad + kernel_col;
@@ -181,26 +178,20 @@ void softmax_cpu(float *input, int n, int batch, int batch_offset, int groups, i
 
 void forward_region_layer(layer l, network net)
 {
-    fprintf(stderr, "doing forward region");
+    fprintf(stderr, "doing forward region\n");
 
     int index;
     int size_in = l.size_in;
 
     memcpy(l.output, net.input, l.size_out*l.size_out*l.n*sizeof(float));
     for(int num = 0; num<l.num; ++num){
-        // l->n = l->num*(classes + coords + 1);
-        //int num_offset = num*l.size_out*l.size_out*(l.coords+l.classes+1);
         index = entry_index(l, num*l.size_out*l.size_out, 0);
         activate_array(l.output + index, 2*l.size_out*l.size_out, LOGISTIC);
         index = entry_index(l, num*l.size_out*l.size_out, l.coords);
         activate_array(l.output + index, l.size_out*l.size_out, LOGISTIC);
     }
     index = entry_index(l, 0, l.coords + 1);
-    //softmax_cpu(net.input + index, l.classes + l.background, l.batch*l.n, l.inputs/l.n, l.w*l.h, 1, l.w*l.h, 1, l.output + index);
-    softmax_cpu(net.input + index, l.classes, l.n, size_in*size_in, size_in*size_in, 1, size_in*size_in, 1, l.output + index);
-
-
-
+    softmax_cpu(net.input + index, l.classes, l.num, size_in*size_in*l.c/l.num, size_in*size_in, 1, size_in*size_in, 1, l.output + index);
 }
 
 void forward_conv_layer(layer l, network net)
@@ -213,14 +204,12 @@ void forward_conv_layer(layer l, network net)
     fprintf(stderr, "doing forward conv...\n");
 
     int pad = l.pad;
-    // int stride = l.stride;
     int ksize = l.size;
     int input_size = l.size_in;
     int input_channel = l.c;
     int output_size = l.size_out;
     int output_channel = l.n;
     float *out = l.output;
-    // int im_r, im_c;
     float *weights = l.weights;
     float *input = net.input;
 
@@ -255,7 +244,7 @@ void forward_conv_layer(layer l, network net)
                     // for row in kernel
                     for (int i = 0; i < ksize; ++i)
                     {
-                        row_offset_kernel = c * ksize;
+                        row_offset_kernel = i * ksize;
                         // for col in kernel
                         for (int j = 0; j < ksize; ++j)
                         {
@@ -265,13 +254,10 @@ void forward_conv_layer(layer l, network net)
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
                             
-                            // get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image)
                             float image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, input);
                             out[col_offset_out +
                                 row_offset_out +
                                 output_channel_offset_out] += (kernel_value * image_value);
-                            //fprintf(stderr, "       update output value\n");
-                            // out += w * get_input_pixel
                         }
                     }
                 }
@@ -371,6 +357,7 @@ void make_region_layer(layer *l, float thresh, int num, int size_in, int classes
     l->biases[9] = 10.52;
 
     l->forward = forward_region_layer;
+    srand(0);
 }
 
 void free_conv_layer(layer *l)
@@ -399,103 +386,18 @@ void free_maxpool_layer(layer *l)
 
 void load_conv_weights(layer *l, FILE *fp)
 {
-    FILE *out_fp;
-    FILE *bnm_fp;
-    FILE *bias_fp;
-
-    if (PRINT_WEIGHT)
-    {
-        if (QUANTIZE)
-            out_fp = fopen("mynet_quant_weight.txt", "a");
-        else
-        {
-            out_fp = fopen("mynet_yolov2_tiny_voc_weight_23.txt", "a");
-            bias_fp = fopen("mynet_bias_23.txt", "a");
-        }
-    }
-
-    if (PRINT_BNM)
-        bnm_fp = fopen("mynet_batch_norm_23.txt", "a");
-
-
     int num = l->c * l->n * l->size * l->size;
     
     fread(l->biases, sizeof(float), l->n, fp);
-    if (PRINT_WEIGHT)
-    {
-        int k;
-        fprintf(bias_fp, "\n");
-        fprintf(bias_fp, " bias: %d\n", num);
-        for (k = 0; k < l->n; ++k)
-        {
-            fprintf(bias_fp, "%g, ", l->biases[k]);
-            if (k % 10 == 9)
-                fprintf(bias_fp, "\n");
-        }
-        fprintf(bias_fp, "\n\n");
-    }
-
 
     if (l->batch_normalize)
     {
         fread(l->scales, sizeof(float), l->n, fp);
         fread(l->rolling_mean, sizeof(float), l->n, fp);
         fread(l->rolling_variance, sizeof(float), l->n, fp);
-
-        if (PRINT_BNM)
-        {
-            int i;
-            fprintf(bnm_fp, "scale: %d\n", l->n);
-            for (i = 0; i < l->n; ++i)
-            {
-                fprintf(bnm_fp, "%g, ", l->scales[i]);
-                if (i % 10 == 9)
-                    fprintf(bnm_fp, "\n");
-            }
-            fprintf(bnm_fp, "\n\n");
-
-            fprintf(bnm_fp, "rolling_mean: %d\n", l->n);
-            for (i = 0; i < l->n; ++i)
-            {
-                fprintf(bnm_fp, "%g, ", l->rolling_mean[i]);
-                if (i % 10 == 9)
-                    fprintf(bnm_fp, "\n");
-            }
-            fprintf(bnm_fp, "\n\n");
-
-            fprintf(bnm_fp, "rolling_var: %d\n", l->n);
-            for (i = 0; i < l->n; ++i)
-            {
-                fprintf(bnm_fp, "%g, ", l->rolling_variance[i]);
-                if (i % 10 == 9)
-                    fprintf(bnm_fp, "\n");
-            }
-            fprintf(bnm_fp, "\n\n");
-        }
     }
 
     fread(l->weights, sizeof(float), num, fp);
-    if (PRINT_WEIGHT)
-    {
-        int k;
-        fprintf(out_fp, "conv weights: %d\n", num);
-        for (k = 0; k < num; ++k)
-        {
-            fprintf(out_fp, "%g, ", l->weights[k]);
-            if (k % 10 == 9)
-                fprintf(out_fp, "\n");
-        }
-        fprintf(out_fp, "\n\n");
-    }
-
-    if (PRINT_WEIGHT){
-        fclose(out_fp);
-        fclose(bias_fp);
-    }
-
-    if (PRINT_BNM)
-        fclose(bnm_fp);
-
 }
 
 void load_connected_weights(layer *l, FILE *fp)
@@ -519,7 +421,6 @@ void load_weights(network *net, char *weights)
         layer l = net->layers[i];
         if (l.type == CONVOLUTION)
         {
-            // fprintf(stderr, "loading conv layer weights\n");
             load_conv_weights(&l, weights_fp);
             fprintf(stderr, "finish loading conv layer weights\n");
         }
@@ -569,7 +470,7 @@ network *make_network()
    12 conv   1024  3 x 3 / 1    13 x  13 x 512   ->    13 x  13 x1024
    13 conv   1024  3 x 3 / 1    13 x  13 x1024   ->    13 x  13 x1024
    14 conv    125  1 x 1 / 1    13 x  13 x1024   ->    13 x  13 x 125
-   15 detection
+   15 region
     */
 
     make_conv_layer(&(net->layers[0]), 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
@@ -600,18 +501,9 @@ network *make_network()
 
     make_conv_layer(&(net->layers[13]), 1024, 3, 1, 1, 1024, LEAKY, 1, 13, 13);
 
-    make_conv_layer(&(net->layers[14]), 125, 1, 1, 1, 1024, LINEAR, 0, 13, 13);
+    make_conv_layer(&(net->layers[14]), 125, 1, 1, 0, 1024, LINEAR, 0, 13, 13);
 
-    // detection layer
-    // make_region_layer(layer *l, float thresh, int num, int size_in, int classes, int coords)
     make_region_layer(&(net->layers[15]), 0.6, 5, 13, 20, 4);
-
-    // for (int i=0; i<net->n; ++i){
-    //     if (workspace_size<net->layers[i].workspace_size){
-    //         workspace_size = net->layers[i].workspace_size;
-    //     }
-    // }
-    // net->workspace = calloc(1, workspace_size);
 
     return net;
 }
@@ -674,7 +566,6 @@ void get_region_detections(layer l, int w, int h, int netw, int neth, float thre
             }
             int obj_index  = entry_index(l, n*l.size_in*l.size_in + i, l.coords);
             int box_index  = entry_index(l, n*l.size_in*l.size_in + i, 0);
-            // int mask_index = entry_index(l, n*l.size_in*l.size_in + i, 4);
             float scale = predictions[obj_index];
             dets[index].bbox = get_region_box(predictions, l.biases, n, box_index, col, row, l.size_in, l.size_in, l.size_in*l.size_in);
             dets[index].objectness = scale > thresh ? scale : 0;
@@ -701,7 +592,6 @@ void fill_network_boxes(network *net, int w, int h, float thresh, float hier, in
         layer l = net->layers[j];
         if(l.type == REGION){
             get_region_detections(l, w, h, net->width, net->height, thresh, map, hier, relative, dets);
-            // dets += l.size_in*l.size_in*l.num;
         }
     }
 }
@@ -734,7 +624,6 @@ detection *make_network_boxes(network *net, float thresh, int *num)
     return dets;
 }
 
-// detection *dets = get_network_boxes(net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes);
 detection *get_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, int *num)
 {
     detection *dets = make_network_boxes(net, thresh, num);
