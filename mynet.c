@@ -202,7 +202,7 @@ int main(int argc, char **argv)
         input_fp = fopen("my_dog_input.txt", "a");
 
     char *filename = argv[1];
-    char *weights_file = "genv2_tiny_voc.weights";
+    char *weights_file = "float_genv2_tiny_voc.weights";
 
     char *names[20] = {"aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "pottedplant", "sheep", "sofa", "train", "tvmonitor"};
 
