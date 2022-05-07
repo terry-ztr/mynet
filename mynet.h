@@ -45,6 +45,7 @@ typedef struct layer layer;
 
 struct layer{
     LAYER_TYPE type;
+    int index;
     // input size
     int size_in;
     // output size
@@ -73,6 +74,10 @@ struct layer{
     int coords;
     int num;
 
+    // for quantization purpose
+    float amax;
+
+    // storage
     float *weights;
     float *biases;
     float *scales;
@@ -128,4 +133,4 @@ image load_image_color(char *filename, int w, int h);
 
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image);
 
-
+float quantize(float x, float amax, int bitnum);

@@ -8,7 +8,7 @@
 
 #define PRINT_INPUT 0
 #define PRINT_OUTPUT 0
-#define PRINT_WEIGHT 0
+#define PRINT_WEIGHT 1
 #define PRINT_BNM 0
 
 char *fgetl(FILE *fp)
@@ -168,12 +168,16 @@ int main(int argc, char **argv)
     }
 
     int test_get_pixel = 0;
-    if(test_get_pixel) {
+    if (test_get_pixel)
+    {
         char *filename = argv[1];
         image im = load_image(filename, 416, 416, 3);
-        for(int ic = 0; ic<3; ++ic){
-            for(int kr = 0; kr<3; ++kr){
-                for(int kc = 0; kc<3; ++kc){
+        for (int ic = 0; ic < 3; ++ic)
+        {
+            for (int kr = 0; kr < 3; ++kr)
+            {
+                for (int kc = 0; kc < 3; ++kc)
+                {
                     float image_value = get_input_pixel(1, 1, ic, kr, kc, 1, 416, im.data);
                     fprintf(stderr, "%g, ", image_value);
                 }
@@ -186,14 +190,14 @@ int main(int argc, char **argv)
 
     FILE *input_fp;
     FILE *check_out_fp;
-    FILE *check_weight_fp;
+    // FILE *check_weight_fp;
     FILE *check_bnm_fp;
 
     if (PRINT_OUTPUT)
         check_out_fp = fopen("mynet_outputs_layer_15.txt", "a");
 
-    if (PRINT_WEIGHT)
-        check_weight_fp = fopen("mynet_weights_layer_1.txt", "a");
+    // if (PRINT_WEIGHT)
+    //     check_weight_fp = fopen("mynet_weights_layer_1.txt", "a");
 
     if (PRINT_BNM)
         check_bnm_fp = fopen("mynet_batchnorm_layer_1.txt", "a");
@@ -212,23 +216,27 @@ int main(int argc, char **argv)
     // create network structure
     network *net = make_network();
 
-    for (int i = 0; i<net->n; ++i){
+    for (int i = 0; i < net->n; ++i)
+    {
         layer ltmp = net->layers[i];
-        if (ltmp.type == CONVOLUTION){
+        if (ltmp.type == CONVOLUTION)
+        {
             fprintf(stderr, "%d conv  %5d %2d x%2d /%2d  %4d x%4d x%4d   ->  %4d x%4d x%4d\n",
                     i, ltmp.n, ltmp.size, ltmp.size, ltmp.stride, ltmp.size_in, ltmp.size_in, ltmp.c, ltmp.size_out, ltmp.size_out, ltmp.n);
         }
-        else if (ltmp.type == MAXPOOL){
+        else if (ltmp.type == MAXPOOL)
+        {
             fprintf(stderr, "%d max         %2d x%2d /%2d  %4d x%4d x%4d   ->  %4d x%4d x%4d\n",
-                    i,  ltmp.size, ltmp.size, ltmp.stride, ltmp.size_in, ltmp.size_in, ltmp.c, ltmp.size_out, ltmp.size_out, ltmp.n);
+                    i, ltmp.size, ltmp.size, ltmp.stride, ltmp.size_in, ltmp.size_in, ltmp.c, ltmp.size_out, ltmp.size_out, ltmp.n);
         }
-        else if (ltmp.type == REGION){
+        else if (ltmp.type == REGION)
+        {
             fprintf(stderr, "%d reg\n", i);
-            fprintf(stderr, "l.num: %d, l.classes: %d, l.coords: %d, l.size_in: %d, l.c: %d, l.w_out %d, l.out_c: %d\n"
-        , ltmp.num, ltmp.classes, ltmp.coords, ltmp.size_in, ltmp.c, ltmp.size_out, ltmp.n);
+            fprintf(stderr, "l.num: %d, l.classes: %d, l.coords: %d, l.size_in: %d, l.c: %d, l.w_out %d, l.out_c: %d\n", ltmp.num, ltmp.classes, ltmp.coords, ltmp.size_in, ltmp.c, ltmp.size_out, ltmp.n);
 
-            for (int i=0; i<10; ++i){
-                fprintf(stderr, "bias[%d]: %g, ",i, ltmp.biases[i]);
+            for (int i = 0; i < 10; ++i)
+            {
+                fprintf(stderr, "bias[%d]: %g, ", i, ltmp.biases[i]);
             }
             fprintf(stderr, "\n");
         }
@@ -274,7 +282,8 @@ int main(int argc, char **argv)
     }
 
     l = net->layers[15];
-    if(l.type == MAXPOOL){
+    if (l.type == MAXPOOL)
+    {
         fprintf(stderr, "check output for MAXPOOL layer\n");
     }
 
@@ -300,29 +309,61 @@ int main(int argc, char **argv)
     // assume weight align (w, h, ic, oc) correct!!!
     if (PRINT_WEIGHT)
     {
-        for (int oc = 0; oc < l.n; ++oc)
+        for (int i = 0; i < net->n; ++i)
         {
-            int output_channel_offset = oc * l.size * l.size * l.c;
-            fprintf(check_weight_fp, "############### oc: %d ###############\n", oc);
-            for (int ic = 0; ic < l.c; ++ic)
+            layer l = net->layers[i];
+            if(l.type != CONVOLUTION)
+                continue;
+
+
+            char fp32_file[50], int8_file[50], sufix[10], num[10];
+            strcpy(fp32_file, "./test_weights/fp32_weight_layer_");
+            strcpy(int8_file, "./test_weights/int8_weight_layer_");
+            strcpy(sufix, ".txt");
+            sprintf(num, "%d", l.index);
+            strcat(fp32_file, num);
+            strcat(int8_file, num);
+            strcat(fp32_file, sufix);
+            strcat(int8_file, sufix);
+            FILE *fp32_weights_fp = fopen(fp32_file, "w");
+            if (!fp32_weights_fp)
+                file_error(fp32_file);
+            FILE *int8_weights_fp = fopen(int8_file, "w");
+            if (!int8_weights_fp)
+                file_error(int8_file);
+
+            for (int oc = 0; oc < l.n; ++oc)
             {
-                int input_channel_offset = ic * l.size * l.size;
-                fprintf(check_weight_fp, "**************** ic: %d ***************\n", ic);
-                for (int r = 0; r < l.size; ++r)
+                int output_channel_offset = oc * l.size * l.size * l.c;
+                fprintf(fp32_weights_fp, "############### oc: %d ###############\n", oc);
+                fprintf(int8_weights_fp, "############### oc: %d ###############\n", oc);
+                for (int ic = 0; ic < l.c; ++ic)
                 {
-                    for (int c = 0; c < l.size; ++c)
+                    int input_channel_offset = ic * l.size * l.size;
+                    fprintf(fp32_weights_fp, "**************** ic: %d ***************\n", ic);
+                    fprintf(int8_weights_fp, "**************** ic: %d ***************\n", ic);
+                    for (int r = 0; r < l.size; ++r)
                     {
-                        fprintf(check_weight_fp, "%g, ",
-                                l.weights[input_channel_offset + output_channel_offset + r * l.size + c]);
+                        for (int c = 0; c < l.size; ++c)
+                        {
+                            fprintf(fp32_weights_fp, "%g, ",
+                                    l.weights[input_channel_offset + output_channel_offset + r * l.size + c]);
+                            fprintf(int8_weights_fp, "%g, ",
+                                    quantize(l.weights[input_channel_offset + 
+                                                output_channel_offset + 
+                                                r * l.size + c],
+                                                l.amax, 8)
+                                    );
+                        }
+                        fprintf(fp32_weights_fp, "\n");
+                        fprintf(int8_weights_fp, "\n");
                     }
-                    fprintf(check_weight_fp, "\n");
                 }
             }
+            fclose(fp32_weights_fp);
         }
     }
 
-    if (PRINT_WEIGHT)
-        fclose(check_weight_fp);
     // print out layer 0 batchnorm
     if (PRINT_BNM)
     {

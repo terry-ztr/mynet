@@ -5,7 +5,17 @@
 #include "mynet.h"
 
 #define LAYERNUM 16
-#define FLT_MAX  10000
+#define FLT_MAX 10000
+#define FIND_RANGE 0
+
+float quantize(float x, float amax, int bitnum){
+    int out_max = pow(2, (bitnum - 1));
+    // float scale = 2*amax/pow(2, bitnum);
+    int xq = round(x * out_max/amax);
+    xq = (xq > out_max) ? out_max : xq;
+    xq = (xq < -out_max) ? -out_max : xq;
+    return xq/(float)out_max;
+}
 
 // correct
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image)
@@ -76,29 +86,35 @@ void forward_batchnorm(float *output, float *rolling_mean, float *rolling_varian
     }
 }
 
-static inline float leaky_activate(float x){return (x>0) ? x : .1*x;}
-static inline float linear_activate(float x){return x;}
-static inline float logistic_activate(float x){return 1./(1. + exp(-x));}
-
+static inline float leaky_activate(float x) { return (x > 0) ? x : .1 * x; }
+static inline float linear_activate(float x) { return x; }
+static inline float logistic_activate(float x) { return 1. / (1. + exp(-x)); }
 
 void activate_array(float *output, int array_len, ACTIVATION a)
 {
-    if(a==LINEAR){
-        for(int i=0; i<array_len; ++i){
+    if (a == LINEAR)
+    {
+        for (int i = 0; i < array_len; ++i)
+        {
             output[i] = linear_activate(output[i]);
         }
     }
-    else if (a==LEAKY){
-        for(int i=0; i<array_len; ++i){
+    else if (a == LEAKY)
+    {
+        for (int i = 0; i < array_len; ++i)
+        {
             output[i] = leaky_activate(output[i]);
         }
     }
-    else if (a==LOGISTIC){
-        for(int i=0; i<array_len; ++i){
+    else if (a == LOGISTIC)
+    {
+        for (int i = 0; i < array_len; ++i)
+        {
             output[i] = logistic_activate(output[i]);
         }
     }
-    else{
+    else
+    {
         fprintf(stderr, "unimplemented activation\n");
     }
 }
@@ -112,22 +128,27 @@ void forward_max_layer(layer l, network net)
     int size_in = l.size_in;
     int stride = l.stride;
 
-    for(int ic = 0; ic < input_channel; ++ic){
+    for (int ic = 0; ic < input_channel; ++ic)
+    {
         int channel_offset_out = ic * size_out * size_out;
         int channel_offset_in = ic * size_in * size_in;
-        for(int r = 0; r < size_out; ++r){
+        for (int r = 0; r < size_out; ++r)
+        {
             int row_offset = r * size_out;
-            for(int c = 0; c < size_out; ++c){
+            for (int c = 0; c < size_out; ++c)
+            {
                 int col_offset = c;
                 int out_index = col_offset + row_offset + channel_offset_out;
                 float max = -FLT_MAX;
                 // for each row in filter
-                for (int h = 0; h<filter_size; ++h){
-                    int h_input = r*stride + h;
+                for (int h = 0; h < filter_size; ++h)
+                {
+                    int h_input = r * stride + h;
                     // for each col in filter
-                    for (int w = 0; w<filter_size; ++w) {
-                        int w_input = c*stride + w;
-                        int index_in = w_input + h_input*size_in + channel_offset_in;
+                    for (int w = 0; w < filter_size; ++w)
+                    {
+                        int w_input = c * stride + w;
+                        int index_in = w_input + h_input * size_in + channel_offset_in;
                         int valid = (h_input >= 0 && h_input < size_in &&
                                      w_input >= 0 && w_input < size_in);
                         float input_val = (valid != 0) ? net.input[index_in] : -FLT_MAX;
@@ -140,12 +161,11 @@ void forward_max_layer(layer l, network net)
     }
 }
 
-
 int entry_index(layer l, int location, int entry)
 {
-    int n =   location / (l.size_out*l.size_out);
-    int loc = location % (l.size_out*l.size_out);
-    return n*l.size_out*l.size_out*(l.coords+l.classes+1) + entry*l.size_out*l.size_out + loc;
+    int n = location / (l.size_out * l.size_out);
+    int loc = location % (l.size_out * l.size_out);
+    return n * l.size_out * l.size_out * (l.coords + l.classes + 1) + entry * l.size_out * l.size_out + loc;
 }
 
 void softmax(float *input, int n, float temp, int stride, float *output)
@@ -153,25 +173,31 @@ void softmax(float *input, int n, float temp, int stride, float *output)
     int i;
     float sum = 0;
     float largest = -FLT_MAX;
-    for(i = 0; i < n; ++i){
-        if(input[i*stride] > largest) largest = input[i*stride];
+    for (i = 0; i < n; ++i)
+    {
+        if (input[i * stride] > largest)
+            largest = input[i * stride];
     }
-    for(i = 0; i < n; ++i){
-        float e = exp(input[i*stride]/temp - largest/temp);
+    for (i = 0; i < n; ++i)
+    {
+        float e = exp(input[i * stride] / temp - largest / temp);
         sum += e;
-        output[i*stride] = e;
+        output[i * stride] = e;
     }
-    for(i = 0; i < n; ++i){
-        output[i*stride] /= sum;
+    for (i = 0; i < n; ++i)
+    {
+        output[i * stride] /= sum;
     }
 }
 
 void softmax_cpu(float *input, int n, int batch, int batch_offset, int groups, int group_offset, int stride, float temp, float *output)
 {
     int g, b;
-    for(b = 0; b < batch; ++b){
-        for(g = 0; g < groups; ++g){
-            softmax(input + b*batch_offset + g*group_offset, n, temp, stride, output + b*batch_offset + g*group_offset);
+    for (b = 0; b < batch; ++b)
+    {
+        for (g = 0; g < groups; ++g)
+        {
+            softmax(input + b * batch_offset + g * group_offset, n, temp, stride, output + b * batch_offset + g * group_offset);
         }
     }
 }
@@ -183,15 +209,16 @@ void forward_region_layer(layer l, network net)
     int index;
     int size_in = l.size_in;
 
-    memcpy(l.output, net.input, l.size_out*l.size_out*l.n*sizeof(float));
-    for(int num = 0; num<l.num; ++num){
-        index = entry_index(l, num*l.size_out*l.size_out, 0);
-        activate_array(l.output + index, 2*l.size_out*l.size_out, LOGISTIC);
-        index = entry_index(l, num*l.size_out*l.size_out, l.coords);
-        activate_array(l.output + index, l.size_out*l.size_out, LOGISTIC);
+    memcpy(l.output, net.input, l.size_out * l.size_out * l.n * sizeof(float));
+    for (int num = 0; num < l.num; ++num)
+    {
+        index = entry_index(l, num * l.size_out * l.size_out, 0);
+        activate_array(l.output + index, 2 * l.size_out * l.size_out, LOGISTIC);
+        index = entry_index(l, num * l.size_out * l.size_out, l.coords);
+        activate_array(l.output + index, l.size_out * l.size_out, LOGISTIC);
     }
     index = entry_index(l, 0, l.coords + 1);
-    softmax_cpu(net.input + index, l.classes, l.num, size_in*size_in*l.c/l.num, size_in*size_in, 1, size_in*size_in, 1, l.output + index);
+    softmax_cpu(net.input + index, l.classes, l.num, size_in * size_in * l.c / l.num, size_in * size_in, 1, size_in * size_in, 1, l.output + index);
 }
 
 void forward_conv_layer(layer l, network net)
@@ -253,6 +280,24 @@ void forward_conv_layer(layer l, network net)
                                                          row_offset_kernel +
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
+                            // if(l.index == 0)
+                            //     kernel_value = quantize(kernel_value, 1, 8);
+                            // else if(l.index == 2)
+                            //     kernel_value = quantize(kernel_value, 1, 8);
+                            // else if(l.index == 4)
+                            //     kernel_value = quantize(kernel_value, 1, 8);
+                            // else if(l.index == 6)
+                            //     kernel_value = quantize(kernel_value, 1, 8);
+                            // else if(l.index == 8)
+                            //     kernel_value = quantize(kernel_value, 1, 8);
+                            // else if(l.index == 10)
+                            //     kernel_value = quantize(kernel_value, 0.5, 8);
+                            // else if(l.index == 12)
+                            //     kernel_value = quantize(kernel_value, 0.12, 8);
+                            // else if(l.index == 13)
+                            //     kernel_value = quantize(kernel_value, 0.05, 8);
+                            // else if(l.index == 14)
+                            //     kernel_value = quantize(kernel_value, 0.5, 8);
                             
                             float image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, input);
                             out[col_offset_out +
@@ -278,10 +323,11 @@ void forward_conv_layer(layer l, network net)
     activate_array(l.output, l.size_out * l.size_out * l.n, l.activation);
 }
 
-void make_conv_layer(layer *l, int num_kernel, int kernel_size, int stride, int pad,
+void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int stride, int pad,
                      int num_channel_in, ACTIVATION act, int batch, int size_in, int size_out)
 {
     int num;
+    l->index = index;
     l->type = CONVOLUTION;
     l->size_in = size_in;
     l->size_out = size_out;
@@ -309,9 +355,10 @@ void make_conv_layer(layer *l, int num_kernel, int kernel_size, int stride, int 
     }
 }
 
-void make_maxpool_layer(layer *l, int num_channel_out, int kernel_size,
+void make_maxpool_layer(layer *l, int index, int num_channel_out, int kernel_size,
                         int stride, int pad, int num_channel_in, int size_in, int size_out)
 {
+    l->index = index;
     l->type = MAXPOOL;
     l->size_in = size_in;
     l->size_out = size_out;
@@ -324,22 +371,22 @@ void make_maxpool_layer(layer *l, int num_channel_out, int kernel_size,
     l->output = calloc(l->size_out * l->size_out * l->n, sizeof(float));
 }
 
-void make_region_layer(layer *l, float thresh, int num, int size_in, int classes, int coords)
+void make_region_layer(layer *l, int index, float thresh, int num, int size_in, int classes, int coords)
 {
+    l->index = index;
     l->type = REGION;
     l->thresh = thresh;
-    
 
     l->num = num;
     l->size_in = size_in;
     l->size_out = l->size_in;
-    l->c = l->num*(classes + coords + 1);
+    l->c = l->num * (classes + coords + 1);
     l->n = l->c;
     l->classes = classes;
     l->coords = coords;
 
-    l->biases = calloc(num*2, sizeof(float));
-    l->output = calloc(l->size_out*l->size_out*l->n, sizeof(float));
+    l->biases = calloc(num * 2, sizeof(float));
+    l->output = calloc(l->size_out * l->size_out * l->n, sizeof(float));
 
     l->biases[0] = 1.08;
     l->biases[1] = 1.19;
@@ -386,8 +433,16 @@ void free_maxpool_layer(layer *l)
 
 void load_conv_weights(layer *l, FILE *fp)
 {
+    float max_w = -10;
+    float min_w = 10;
+    float max_mean = -10;
+    float min_mean = 10;
+    float max_variance = -10;
+    float min_variance = 10;
+    float max_scale = -10;
+    float min_scale = 10;
     int num = l->c * l->n * l->size * l->size;
-    
+
     fread(l->biases, sizeof(float), l->n, fp);
 
     if (l->batch_normalize)
@@ -398,6 +453,69 @@ void load_conv_weights(layer *l, FILE *fp)
     }
 
     fread(l->weights, sizeof(float), num, fp);
+
+    if (FIND_RANGE)
+    {
+        // find max min w
+        for (int i = 0; i < num; ++i)
+        {
+            if (max_w < l->weights[i])
+            {
+                max_w = l->weights[i];
+            }
+            if (min_w > l->weights[i])
+            {
+                min_w = l->weights[i];
+            }
+        }
+        fprintf(stderr, "max_w: %g, min_w: %g\n", max_w, min_w);
+
+        if (l->batch_normalize)
+        {
+            // find max min mean
+            for (int i = 0; i < l->n; ++i)
+            {
+                if (max_mean < l->rolling_mean[i])
+                {
+                    max_mean = l->rolling_mean[i];
+                }
+                if (min_mean > l->rolling_mean[i])
+                {
+                    min_mean = l->rolling_mean[i];
+                }
+            }
+            fprintf(stderr, "max_mean: %g, min_mean: %g\n", max_mean, min_mean);
+
+            // find max min var
+            for (int i = 0; i < l->n; ++i)
+            {
+                if (max_variance < l->rolling_variance[i])
+                {
+                    max_variance = l->rolling_variance[i];
+                }
+                if (min_variance > l->rolling_variance[i])
+                {
+                    min_variance = l->rolling_variance[i];
+                }
+            }
+            fprintf(stderr, "max_variance: %g, min_variance: %g\n", max_variance, min_variance);
+
+            // find max min scale
+            for (int i = 0; i < l->n; ++i)
+            {
+                if (max_scale < l->scales[i])
+                {
+                    max_scale = l->scales[i];
+                }
+                if (min_scale > l->scales[i])
+                {
+                    min_scale = l->scales[i];
+                }
+            }
+            fprintf(stderr, "max_scale: %g, min_scale: %g\n", max_scale, min_scale);
+        }
+        fprintf(stderr, "\n");
+    }
 }
 
 void load_connected_weights(layer *l, FILE *fp)
@@ -421,8 +539,8 @@ void load_weights(network *net, char *weights)
         layer l = net->layers[i];
         if (l.type == CONVOLUTION)
         {
+            fprintf(stderr, "loading %d conv layer weights\n", i);
             load_conv_weights(&l, weights_fp);
-            fprintf(stderr, "finish loading conv layer weights\n");
         }
         else if (l.type == CONNECTED)
         {
@@ -431,11 +549,11 @@ void load_weights(network *net, char *weights)
         }
         else if (l.type == MAXPOOL)
         {
-            fprintf(stderr, "no loading needed for maxpool layer\n");
+            // fprintf(stderr, "no loading needed for maxpool layer\n");
         }
         else if (l.type == REGION)
         {
-            fprintf(stderr, "no loading needed for region layer\n");
+            // printf(stderr, "no loading needed for region layer\n");
         }
     }
 }
@@ -473,37 +591,38 @@ network *make_network()
    15 region
     */
 
-    make_conv_layer(&(net->layers[0]), 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
+    make_conv_layer(&(net->layers[0]), 0, 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
 
-    make_maxpool_layer(&(net->layers[1]), 16, 2, 2, 1, 16, 416, 208);
 
-    make_conv_layer(&(net->layers[2]), 32, 3, 1, 1, 16, LEAKY, 1, 208, 208);
+    make_maxpool_layer(&(net->layers[1]), 1, 16, 2, 2, 1, 16, 416, 208);
 
-    make_maxpool_layer(&(net->layers[3]), 32, 2, 2, 1, 32, 208, 104);
+    make_conv_layer(&(net->layers[2]), 2, 32, 3, 1, 1, 16, LEAKY, 1, 208, 208);
 
-    make_conv_layer(&(net->layers[4]), 64, 3, 1, 1, 32, LEAKY, 1, 104, 104);
+    make_maxpool_layer(&(net->layers[3]), 3, 32, 2, 2, 1, 32, 208, 104);
 
-    make_maxpool_layer(&(net->layers[5]), 64, 2, 2, 1, 64, 104, 52);
+    make_conv_layer(&(net->layers[4]), 4, 64, 3, 1, 1, 32, LEAKY, 1, 104, 104);
 
-    make_conv_layer(&(net->layers[6]), 128, 3, 1, 1, 64, LEAKY, 1, 52, 52);
+    make_maxpool_layer(&(net->layers[5]), 5, 64, 2, 2, 1, 64, 104, 52);
 
-    make_maxpool_layer(&(net->layers[7]), 128, 2, 2, 1, 128, 52, 26);
+    make_conv_layer(&(net->layers[6]), 6, 128, 3, 1, 1, 64, LEAKY, 1, 52, 52);
 
-    make_conv_layer(&(net->layers[8]), 256, 3, 1, 1, 128, LEAKY, 1, 26, 26);
+    make_maxpool_layer(&(net->layers[7]), 7, 128, 2, 2, 1, 128, 52, 26);
 
-    make_maxpool_layer(&(net->layers[9]), 256, 2, 2, 1, 256, 26, 13);
+    make_conv_layer(&(net->layers[8]), 8, 256, 3, 1, 1, 128, LEAKY, 1, 26, 26);
 
-    make_conv_layer(&(net->layers[10]), 512, 3, 1, 1, 256, LEAKY, 1, 13, 13);
+    make_maxpool_layer(&(net->layers[9]), 9, 256, 2, 2, 1, 256, 26, 13);
 
-    make_maxpool_layer(&(net->layers[11]), 512, 2, 1, 1, 512, 13, 13);
+    make_conv_layer(&(net->layers[10]), 10, 512, 3, 1, 1, 256, LEAKY, 1, 13, 13);
 
-    make_conv_layer(&(net->layers[12]), 1024, 3, 1, 1, 512, LEAKY, 1, 13, 13);
+    make_maxpool_layer(&(net->layers[11]), 11, 512, 2, 1, 1, 512, 13, 13);
 
-    make_conv_layer(&(net->layers[13]), 1024, 3, 1, 1, 1024, LEAKY, 1, 13, 13);
+    make_conv_layer(&(net->layers[12]), 12, 1024, 3, 1, 1, 512, LEAKY, 1, 13, 13);
 
-    make_conv_layer(&(net->layers[14]), 125, 1, 1, 0, 1024, LINEAR, 0, 13, 13);
+    make_conv_layer(&(net->layers[13]), 13, 1024, 3, 1, 1, 1024, LEAKY, 1, 13, 13);
 
-    make_region_layer(&(net->layers[15]), 0.6, 5, 13, 20, 4);
+    make_conv_layer(&(net->layers[14]), 14, 125, 1, 1, 0, 1024, LINEAR, 0, 13, 13);
+
+    make_region_layer(&(net->layers[15]), 15, 0.6, 5, 13, 20, 4);
 
     return net;
 }
@@ -544,65 +663,73 @@ void free_network(network *net)
 box get_region_box(float *x, float *biases, int n, int index, int i, int j, int w, int h, int stride)
 {
     box b;
-    b.x = (i + x[index + 0*stride]) / w;
-    b.y = (j + x[index + 1*stride]) / h;
-    b.w = exp(x[index + 2*stride]) * biases[2*n]   / w;
-    b.h = exp(x[index + 3*stride]) * biases[2*n+1] / h;
+    b.x = (i + x[index + 0 * stride]) / w;
+    b.y = (j + x[index + 1 * stride]) / h;
+    b.w = exp(x[index + 2 * stride]) * biases[2 * n] / w;
+    b.h = exp(x[index + 3 * stride]) * biases[2 * n + 1] / h;
     return b;
 }
 
 void get_region_detections(layer l, int w, int h, int netw, int neth, float thresh,
-                            int *map, float tree_thresh, int relative, detection *dets)
+                           int *map, float tree_thresh, int relative, detection *dets)
 {
-    int i,j,n;
+    int i, j, n;
     float *predictions = l.output;
-    for (i = 0; i < l.size_in*l.size_in; ++i){
+    for (i = 0; i < l.size_in * l.size_in; ++i)
+    {
         int row = i / l.size_in;
         int col = i % l.size_in;
-        for(n = 0; n < l.num; ++n){
-            int index = n*l.size_in*l.size_in + i;
-            for(j = 0; j < l.classes; ++j){
+        for (n = 0; n < l.num; ++n)
+        {
+            int index = n * l.size_in * l.size_in + i;
+            for (j = 0; j < l.classes; ++j)
+            {
                 dets[index].prob[j] = 0;
             }
-            int obj_index  = entry_index(l, n*l.size_in*l.size_in + i, l.coords);
-            int box_index  = entry_index(l, n*l.size_in*l.size_in + i, 0);
+            int obj_index = entry_index(l, n * l.size_in * l.size_in + i, l.coords);
+            int box_index = entry_index(l, n * l.size_in * l.size_in + i, 0);
             float scale = predictions[obj_index];
-            dets[index].bbox = get_region_box(predictions, l.biases, n, box_index, col, row, l.size_in, l.size_in, l.size_in*l.size_in);
+            dets[index].bbox = get_region_box(predictions, l.biases, n, box_index, col, row, l.size_in, l.size_in, l.size_in * l.size_in);
             dets[index].objectness = scale > thresh ? scale : 0;
-            
-            if(dets[index].objectness){
-                for(j = 0; j < l.classes; ++j){
-                    int class_index = entry_index(l, l.size_in*l.size_in + i, l.coords + 1 + j);
-                    float prob = scale*predictions[class_index];
+
+            if (dets[index].objectness)
+            {
+                for (j = 0; j < l.classes; ++j)
+                {
+                    int class_index = entry_index(l, l.size_in * l.size_in + i, l.coords + 1 + j);
+                    float prob = scale * predictions[class_index];
                     dets[index].prob[j] = (prob > thresh) ? prob : 0;
                 }
             }
-            
         }
     }
 }
 
-
-//detection boxes
+// detection boxes
 
 void fill_network_boxes(network *net, int w, int h, float thresh, float hier, int *map, int relative, detection *dets)
 {
     int j;
-    for(j = 0; j < net->n; ++j){
+    for (j = 0; j < net->n; ++j)
+    {
         layer l = net->layers[j];
-        if(l.type == REGION){
+        if (l.type == REGION)
+        {
             get_region_detections(l, w, h, net->width, net->height, thresh, map, hier, relative, dets);
         }
     }
 }
 
-int num_detections(network *net, float thresh) {
+int num_detections(network *net, float thresh)
+{
     int i;
     int s = 0;
-    for(i = 0; i < net->n; ++i){
+    for (i = 0; i < net->n; ++i)
+    {
         layer l = net->layers[i];
-        if(l.type == REGION){
-            s += l.size_out*l.size_out*l.num;
+        if (l.type == REGION)
+        {
+            s += l.size_out * l.size_out * l.num;
         }
     }
     return s;
@@ -613,12 +740,15 @@ detection *make_network_boxes(network *net, float thresh, int *num)
     layer l = net->layers[net->n - 1];
     int i;
     int nboxes = num_detections(net, thresh);
-    if(num) *num = nboxes;
+    if (num)
+        *num = nboxes;
     detection *dets = calloc(nboxes, sizeof(detection));
-    for(i = 0; i < nboxes; ++i){
+    for (i = 0; i < nboxes; ++i)
+    {
         dets[i].prob = calloc(l.classes, sizeof(float));
-        if(l.coords > 4){
-            dets[i].mask = calloc(l.coords-4, sizeof(float));
+        if (l.coords > 4)
+        {
+            dets[i].mask = calloc(l.coords - 4, sizeof(float));
         }
     }
     return dets;
@@ -634,9 +764,11 @@ detection *get_network_boxes(network *net, int w, int h, float thresh, float hie
 void free_detections(detection *dets, int n)
 {
     int i;
-    for(i = 0; i < n; ++i){
+    for (i = 0; i < n; ++i)
+    {
         free(dets[i].prob);
-        if(dets[i].mask) free(dets[i].mask);
+        if (dets[i].mask)
+            free(dets[i].mask);
     }
     free(dets);
 }
