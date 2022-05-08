@@ -4,17 +4,36 @@
 #include <string.h>
 #include "mynet.h"
 
-#define LAYERNUM 16
-#define FLT_MAX 10000
 #define FIND_RANGE 0
+#define FIND_OUT_RANGE 0
 
-float quantize(float x, float amax, int bitnum){
-    int out_max = pow(2, (bitnum - 1));
+float quantize(float x, float amax, int bitnum)
+{
+    int xq, out_max;
+    float x_dq;
+
+    out_max = pow(2, (bitnum - 1));
     // float scale = 2*amax/pow(2, bitnum);
-    int xq = round(x * out_max/amax);
+    xq = round(x * out_max / amax);
     xq = (xq > out_max) ? out_max : xq;
     xq = (xq < -out_max) ? -out_max : xq;
-    return xq/(float)out_max;
+    x_dq = xq / (float)out_max * amax;
+    return x_dq;
+}
+
+void print_range_array(float *output, int array_len){
+    float max_out = -100000;
+    float min_out = 100000;
+    float out;
+    for (int i=0; i <array_len; ++i){
+        out = output[i];
+        if (max_out < out)
+            max_out = out;
+        if (min_out > out)
+            min_out = out;
+    }
+    fprintf(stderr, "max_out = %g ", max_out);
+    fprintf(stderr, "min_out = %g\n", min_out);
 }
 
 // correct
@@ -86,7 +105,7 @@ void forward_batchnorm(float *output, float *rolling_mean, float *rolling_varian
     }
 }
 
-static inline float leaky_activate(float x) { return (x > 0) ? x : .1 * x; }
+static inline float leaky_activate(float x) { return (x > 0) ? x : 0.125 * x; }
 static inline float linear_activate(float x) { return x; }
 static inline float logistic_activate(float x) { return 1. / (1. + exp(-x)); }
 
@@ -117,6 +136,14 @@ void activate_array(float *output, int array_len, ACTIVATION a)
     {
         fprintf(stderr, "unimplemented activation\n");
     }
+}
+
+// todo:
+void quantize_array(float *output, int array_len, float amax, int bitnum){
+    for (int i = 0; i < array_len; ++i)
+        {
+            output[i] = quantize(output[i], amax, bitnum);
+        }
 }
 
 void forward_max_layer(layer l, network net)
@@ -280,25 +307,25 @@ void forward_conv_layer(layer l, network net)
                                                          row_offset_kernel +
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
-                            // if(l.index == 0)
-                            //     kernel_value = quantize(kernel_value, 1, 8);
-                            // else if(l.index == 2)
-                            //     kernel_value = quantize(kernel_value, 1, 8);
-                            // else if(l.index == 4)
-                            //     kernel_value = quantize(kernel_value, 1, 8);
-                            // else if(l.index == 6)
-                            //     kernel_value = quantize(kernel_value, 1, 8);
-                            // else if(l.index == 8)
-                            //     kernel_value = quantize(kernel_value, 1, 8);
-                            // else if(l.index == 10)
-                            //     kernel_value = quantize(kernel_value, 0.5, 8);
-                            // else if(l.index == 12)
-                            //     kernel_value = quantize(kernel_value, 0.12, 8);
-                            // else if(l.index == 13)
-                            //     kernel_value = quantize(kernel_value, 0.05, 8);
-                            // else if(l.index == 14)
-                            //     kernel_value = quantize(kernel_value, 0.5, 8);
-                            
+                            // if (l.index == 0)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 2)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 4)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 6)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 8)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 10)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 12)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 13)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+                            // else if (l.index == 14)
+                            //     kernel_value = quantize(kernel_value, l.amax, 8);
+
                             float image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, input);
                             out[col_offset_out +
                                 row_offset_out +
@@ -321,6 +348,12 @@ void forward_conv_layer(layer l, network net)
         add_bias(l.output, l.biases, l.n, l.size_out);
     }
     activate_array(l.output, l.size_out * l.size_out * l.n, l.activation);
+    if(FIND_OUT_RANGE){
+        fprintf(stderr, "layer %d\n", l.index);
+        print_range_array(l.output, l.size_out * l.size_out * l.n);
+    }
+    if(l.quantize)
+        quantize_array(l.output, l.size_out * l.size_out * l.n, l.amax_out, 8);
 }
 
 void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int stride, int pad,
@@ -353,6 +386,7 @@ void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int s
         l->rolling_mean = calloc(l->n, sizeof(float));
         l->rolling_variance = calloc(l->n, sizeof(float));
     }
+
 }
 
 void make_maxpool_layer(layer *l, int index, int num_channel_out, int kernel_size,
@@ -453,6 +487,22 @@ void load_conv_weights(layer *l, FILE *fp)
     }
 
     fread(l->weights, sizeof(float), num, fp);
+
+    if (l->quantize){
+        // quantize weight
+        if(l->index != 14)
+            quantize_array(l->weights, num, l->amax_w, 8);
+        else if(l->index == 14)
+            // fully connected layer are quantized to 8bit
+            quantize_array(l->weights, num, l->amax_w, 8);
+
+        if (l->batch_normalize)
+        {
+            quantize_array(l->rolling_mean, l->n, l->amax_m, 16);
+            quantize_array(l->rolling_variance, l->n, l->amax_var, 16);
+            quantize_array(l->scales, l->n, l->amax_scale, 16);
+        }
+    }
 
     if (FIND_RANGE)
     {
@@ -591,35 +641,85 @@ network *make_network()
    15 region
     */
 
+    net->layers[0].amax_w = 1;
+    net->layers[0].amax_out = 60;
+    net->layers[0].amax_m = 1;
+    net->layers[0].amax_var = 0.2;
+    net->layers[0].amax_scale = 6;
+    net->layers[0].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[0]), 0, 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
-
 
     make_maxpool_layer(&(net->layers[1]), 1, 16, 2, 2, 1, 16, 416, 208);
 
+    net->layers[2].amax_w = 1;
+    net->layers[2].amax_out = 30;   
+    net->layers[2].amax_m = 10;
+    net->layers[2].amax_var = 65;
+    net->layers[2].amax_scale = 6;
+    net->layers[2].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[2]), 2, 32, 3, 1, 1, 16, LEAKY, 1, 208, 208);
 
     make_maxpool_layer(&(net->layers[3]), 3, 32, 2, 2, 1, 32, 208, 104);
 
+    net->layers[4].amax_w = 1;
+    net->layers[4].amax_out = 20;
+    net->layers[4].amax_m = 5;
+    net->layers[4].amax_var = 10;
+    net->layers[4].amax_scale = 5;
+    net->layers[4].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[4]), 4, 64, 3, 1, 1, 32, LEAKY, 1, 104, 104);
 
     make_maxpool_layer(&(net->layers[5]), 5, 64, 2, 2, 1, 64, 104, 52);
 
+    net->layers[6].amax_w = 0.6;
+    net->layers[6].amax_out = 20;
+    net->layers[6].amax_m = 5;
+    net->layers[6].amax_var = 10;
+    net->layers[6].amax_scale = 5;
+    net->layers[6].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[6]), 6, 128, 3, 1, 1, 64, LEAKY, 1, 52, 52);
 
     make_maxpool_layer(&(net->layers[7]), 7, 128, 2, 2, 1, 128, 52, 26);
 
+    net->layers[8].amax_w = 0.5;
+    net->layers[8].amax_out = 15;
+    net->layers[8].amax_m = 3;
+    net->layers[8].amax_var = 5;
+    net->layers[8].amax_scale = 3;
+    net->layers[8].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[8]), 8, 256, 3, 1, 1, 128, LEAKY, 1, 26, 26);
 
     make_maxpool_layer(&(net->layers[9]), 9, 256, 2, 2, 1, 256, 26, 13);
 
+    net->layers[10].amax_w = 0.4;
+    net->layers[10].amax_out = 11;
+    net->layers[10].amax_m = 2;
+    net->layers[10].amax_var = 3;
+    net->layers[10].amax_scale = 3;
+    net->layers[10].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[10]), 10, 512, 3, 1, 1, 256, LEAKY, 1, 13, 13);
 
     make_maxpool_layer(&(net->layers[11]), 11, 512, 2, 1, 1, 512, 13, 13);
 
+    net->layers[12].amax_w = 0.12;
+    net->layers[12].amax_out = 10;
+    net->layers[12].amax_m = 1;
+    net->layers[12].amax_var = 3;
+    net->layers[12].amax_scale = 10;
+    net->layers[12].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[12]), 12, 1024, 3, 1, 1, 512, LEAKY, 1, 13, 13);
 
+    net->layers[13].amax_w = 0.05;
+    net->layers[13].amax_out = 10;
+    net->layers[13].amax_m = 3;
+    net->layers[13].amax_var = 17;
+    net->layers[13].amax_scale = 1;
+    net->layers[13].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[13]), 13, 1024, 3, 1, 1, 1024, LEAKY, 1, 13, 13);
 
+    net->layers[14].amax_w = 0.25;
+    net->layers[14].amax_out = 25;
+    net->layers[14].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[14]), 14, 125, 1, 1, 0, 1024, LINEAR, 0, 13, 13);
 
     make_region_layer(&(net->layers[15]), 15, 0.6, 5, 13, 20, 4);

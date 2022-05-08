@@ -2,48 +2,57 @@ max_w: 0.902762, min_w: -0.990957
 max_mean: 0.68147, min_mean: -0.291988
 max_variance: 0.191397, min_variance: 0.0022463
 max_scale: 5.7179, min_scale: 0.906295
+max_out = 60.1199 min_out = -8.0068
 
 loading 2 conv layer weights
 max_w: 0.453972, min_w: -0.921063
 max_mean: 6.5985, min_mean: -8.81186
 max_variance: 64.3108, min_variance: 2.06459
 max_scale: 5.6544, min_scale: 1.0368
+max_out = 28.378 min_out = -7.30854
 
 loading 4 conv layer weights
 max_w: 0.714008, min_w: -0.468274
 max_mean: 3.46183, min_mean: -5.00403
 max_variance: 8.52962, min_variance: 0.647955
 max_scale: 4.35727, min_scale: 1.10975
+max_out = 20.6872 min_out = -5.04126
 
 loading 6 conv layer weights
 max_w: 0.597239, min_w: -0.389497
 max_mean: 4.59023, min_mean: -5.1449
 max_variance: 9.5082, min_variance: 1.50429
 max_scale: 3.3965, min_scale: 1.19796
+max_out = 18.3268 min_out = -3.5532
 
 loading 8 conv layer weights
 max_w: 0.526039, min_w: -0.283791
 max_mean: 2.86971, min_mean: -2.92411
 max_variance: 4.32212, min_variance: 0.832891
 max_scale: 2.71297, min_scale: 0.94524
+max_out = 15.038 min_out = -2.483
 
 loading 10 conv layer weights
 max_w: 0.358668, min_w: -0.26398
 max_mean: 1.11254, min_mean: -1.70848
 max_variance: 2.31973, min_variance: 0.347506
 max_scale: 2.42755, min_scale: 0.480209
+max_out = 11.0258 min_out = -2.03426
 
 loading 12 conv layer weights
 max_w: 0.12369, min_w: -0.116306
 max_mean: 0.337196, min_mean: -0.517705
 max_variance: 2.12895, min_variance: 0.107082
 max_scale: 7.92244, min_scale: 3.01494
+max_out = 37.1703 min_out = -7.27536
 
 loading 13 conv layer weights
 max_w: 0.051598, min_w: -0.0469901
 max_mean: 2.43679, min_mean: -1.82418
 max_variance: 16.3784, min_variance: 2.40268
 max_scale: 1.06724, min_scale: 0.999034
+max_out = 9.31835 min_out = -1.21747
 
 loading 14 conv layer weights
 max_w: 0.194173, min_w: -0.234893
+max_out = 24.4914 min_out = -16.4845

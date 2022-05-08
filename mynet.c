@@ -4,11 +4,8 @@
 
 #include "mynet.h"
 
-#define INT_MAX 2147483647
 
 #define PRINT_INPUT 0
-#define PRINT_OUTPUT 0
-#define PRINT_WEIGHT 1
 #define PRINT_BNM 0
 
 char *fgetl(FILE *fp)
@@ -189,15 +186,8 @@ int main(int argc, char **argv)
     }
 
     FILE *input_fp;
-    FILE *check_out_fp;
     // FILE *check_weight_fp;
     FILE *check_bnm_fp;
-
-    if (PRINT_OUTPUT)
-        check_out_fp = fopen("mynet_outputs_layer_15.txt", "a");
-
-    // if (PRINT_WEIGHT)
-    //     check_weight_fp = fopen("mynet_weights_layer_1.txt", "a");
 
     if (PRINT_BNM)
         check_bnm_fp = fopen("mynet_batchnorm_layer_1.txt", "a");
@@ -289,22 +279,42 @@ int main(int argc, char **argv)
 
     if (PRINT_OUTPUT)
     {
-        for (int oc = 0; oc < l.n; ++oc)
+        for (int i = 0; i < net->n; ++i)
         {
-            fprintf(check_out_fp, "*************** oc: %d ***************\n", oc);
-            for (int r = 0; r < 10; ++r)
+            char fp32_file[50], int8_file[50], sufix[10], num[10];
+            strcpy(fp32_file, "./test_output/fp32_output_layer_");
+            strcpy(int8_file, "./test_output/int8_output_layer_");
+            strcpy(sufix, ".txt");
+            sprintf(num, "%d", l.index);
+            strcat(fp32_file, num);
+            strcat(int8_file, num);
+            strcat(fp32_file, sufix);
+            strcat(int8_file, sufix);
+
+            FILE *output_fp;
+            if(l.quantize)
+                output_fp= fopen(int8_file, "w");
+            else
+                output_fp = fopen(fp32_file, "w");
+            if (!output_fp)
+                file_error("output file");
+
+            for (int oc = 0; oc < l.n; ++oc)
             {
-                for (int c = 0; c < 10; ++c)
+                fprintf(output_fp, "*************** oc: %d ***************\n", oc);
+                for (int r = 0; r < 10; ++r)
                 {
-                    fprintf(check_out_fp, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+                    for (int c = 0; c < 10; ++c)
+                    {
+                        fprintf(output_fp, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+                    }
+                    fprintf(output_fp, "\n");
                 }
-                fprintf(check_out_fp, "\n");
             }
+            fclose(output_fp);
         }
     }
 
-    if (PRINT_OUTPUT)
-        fclose(check_out_fp);
 
     // assume weight align (w, h, ic, oc) correct!!!
     if (PRINT_WEIGHT)
@@ -315,7 +325,6 @@ int main(int argc, char **argv)
             if(l.type != CONVOLUTION)
                 continue;
 
-
             char fp32_file[50], int8_file[50], sufix[10], num[10];
             strcpy(fp32_file, "./test_weights/fp32_weight_layer_");
             strcpy(int8_file, "./test_weights/int8_weight_layer_");
@@ -325,42 +334,36 @@ int main(int argc, char **argv)
             strcat(int8_file, num);
             strcat(fp32_file, sufix);
             strcat(int8_file, sufix);
-            FILE *fp32_weights_fp = fopen(fp32_file, "w");
-            if (!fp32_weights_fp)
-                file_error(fp32_file);
-            FILE *int8_weights_fp = fopen(int8_file, "w");
-            if (!int8_weights_fp)
-                file_error(int8_file);
+
+            FILE *weights_fp;
+            if(l.quantize)
+                weights_fp= fopen(int8_file, "w");
+            else
+                weights_fp = fopen(fp32_file, "w");
+
+            if (!weights_fp)
+                file_error("weight file");
 
             for (int oc = 0; oc < l.n; ++oc)
             {
                 int output_channel_offset = oc * l.size * l.size * l.c;
-                fprintf(fp32_weights_fp, "############### oc: %d ###############\n", oc);
-                fprintf(int8_weights_fp, "############### oc: %d ###############\n", oc);
+                fprintf(weights_fp, "############### oc: %d ###############\n", oc);
                 for (int ic = 0; ic < l.c; ++ic)
                 {
                     int input_channel_offset = ic * l.size * l.size;
-                    fprintf(fp32_weights_fp, "**************** ic: %d ***************\n", ic);
-                    fprintf(int8_weights_fp, "**************** ic: %d ***************\n", ic);
+                    fprintf(weights_fp, "**************** ic: %d ***************\n", ic);
                     for (int r = 0; r < l.size; ++r)
                     {
                         for (int c = 0; c < l.size; ++c)
                         {
-                            fprintf(fp32_weights_fp, "%g, ",
+                            fprintf(weights_fp, "%g, ",
                                     l.weights[input_channel_offset + output_channel_offset + r * l.size + c]);
-                            fprintf(int8_weights_fp, "%g, ",
-                                    quantize(l.weights[input_channel_offset + 
-                                                output_channel_offset + 
-                                                r * l.size + c],
-                                                l.amax, 8)
-                                    );
                         }
-                        fprintf(fp32_weights_fp, "\n");
-                        fprintf(int8_weights_fp, "\n");
+                        fprintf(weights_fp, "\n");
                     }
                 }
             }
-            fclose(fp32_weights_fp);
+            fclose(weights_fp);
         }
     }
 
@@ -409,7 +412,11 @@ int main(int argc, char **argv)
     draw_detections(im, dets, nboxes, thresh, names, alphabet, l.classes);
 
     free_detections(dets, nboxes);
-    save_image(im, "predictions");
+
+    if(QUANTIZE_ENABLE)
+        save_image(im, "int8_predictions");
+    else
+        save_image(im, "fp32_predictions");
 
     free_network(net);
     free_image(im);

@@ -1,3 +1,15 @@
+#define QUANTIZE_ENABLE 1
+#define PRINT_OUTPUT 1
+#define PRINT_WEIGHT 1
+#define FIND_RANGE 0
+#define FIND_OUT_RANGE 0
+
+#define INT_MAX 2147483647
+#define FLT_MAX 10000
+
+#define LAYERNUM 16
+
+
 typedef struct
 {
     int w;
@@ -75,7 +87,12 @@ struct layer{
     int num;
 
     // for quantization purpose
-    float amax;
+    float amax_w;
+    float amax_out;
+    float amax_m;
+    float amax_var;
+    float amax_scale;
+    int quantize;
 
     // storage
     float *weights;
