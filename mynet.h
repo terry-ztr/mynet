@@ -1,6 +1,6 @@
 #define QUANTIZE_ENABLE 1
-#define PRINT_OUTPUT 0
-#define PRINT_WEIGHT 0
+#define PRINT_OUTPUT 1
+#define PRINT_WEIGHT 1
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
@@ -8,6 +8,8 @@
 #define FLT_MAX 10000
 
 #define LAYERNUM 16
+
+#define FULL_INT8 0
 
 
 typedef struct
@@ -78,8 +80,6 @@ struct layer{
     int batch_normalize;
     // detection thresh hold
     float thresh;
-    // space needed for intermidiate calculation in byte
-    // size_t workspace_size;
 
     // region layer
     int classes;
@@ -92,6 +92,8 @@ struct layer{
     float amax_m;
     float amax_var;
     float amax_scale;
+    // before batchnorm
+    float amax_out_raw;
     int quantize;
 
     // storage
@@ -107,9 +109,11 @@ struct layer{
     int8_t *int8_scales;
     int8_t *int8_rolling_mean;
     int8_t *int8_rolling_variance;
+    int *intermediate_output;
     int8_t *int8_output;
 
     void (*forward)   (struct layer, struct network);
+    void (*int8_forward)   (struct layer, struct network);
 };
 
 typedef struct network{
@@ -123,7 +127,6 @@ typedef struct network{
     float *input;
     int8_t *int8_output;
     int8_t *int8_input;
-    float *workspace;
 } network;
 
 typedef struct node{
@@ -160,6 +163,10 @@ image load_image_color(char *filename, int w, int h);
 
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image);
 
-float quantize(float x, float amax, int bitnum);
-
 int8_t int8_quantize(float x, float amax, int bitnum);
+
+float int8_dequantize(int8_t xq, float amax, int bitnum);
+
+void quantize_array(float *output, int8_t *int8_output, int array_len, float amax, int bitnum);
+
+void sudo_quantize_array(float *output, int array_len, float amax, int bitnum);

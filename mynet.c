@@ -158,9 +158,11 @@ image **load_alphabet()
 
 int main(int argc, char **argv)
 {
-    // float y = int8_quantize(0.228, 0.06, 8);
-    // fprintf(stderr, "y: %f\n", y);
+    // int8_t y = int8_quantize(-0.228, 0.06, 8);
+    // float ydq = int8_dequantize(y, 0.06, 8);
+    // fprintf(stderr, "ydq: %f\n", ydq);
     // return 0;
+
     if (argc < 2)
     {
         fprintf(stderr, "usage: give a filename\n");
@@ -243,6 +245,16 @@ int main(int argc, char **argv)
     image im = load_image(filename, net->width, net->height, net->channels);
 
     net->input = im.data;
+    // quantize input image
+    if(QUANTIZE_ENABLE)
+    {
+        // quantize input image
+        if (FULL_INT8){
+            net->int8_input = calloc(net->width*net->height*net->channels, sizeof(int8_t));
+            quantize_array(net->input, net->int8_input, net->width*net->height*net->channels, 1, 8);
+        }
+        sudo_quantize_array(net->input, net->width*net->height*net->channels, 1, 8);
+    }
 
     layer l;
 
@@ -269,9 +281,19 @@ int main(int argc, char **argv)
     {
         net->index = i;
         l = net->layers[i];
-        l.forward(l, *net);
-
-        net->input = l.output;
+        if(FULL_INT8 && l.type == CONVOLUTION)
+        {
+            l.int8_forward(l, *net);
+            net->int8_input = l.int8_output;
+            net->input = l.output;
+            // fprintf(stderr, "finish forward layer %d\n", i);
+        }
+        else
+        {
+            l.forward(l, *net);
+            net->input = l.output;
+            // fprintf(stderr, "finish forward layer %d\n", i);
+        }
     }
 
     l = net->layers[15];

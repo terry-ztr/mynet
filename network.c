@@ -7,6 +7,13 @@
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
+float full_precision_dequantize(int xq, float amax, int bitnum)
+{
+    int out_max = (pow(2, (bitnum - 1))-1);
+    float x_dq = xq / (float)out_max * amax;
+    return x_dq;
+}
+
 float int8_dequantize(int8_t xq, float amax, int bitnum)
 {
     int out_max = (pow(2, (bitnum - 1))-1);
@@ -72,7 +79,15 @@ void dequantize_array(int8_t *int8_output, float *output,  int array_len, float 
 {
     for (int i = 0; i < array_len; ++i)
         {
-            output[i] = int8_quantize(int8_output[i], amax, bitnum);
+            output[i] = int8_dequantize(int8_output[i], amax, bitnum);
+        }
+}
+
+void full_precision_dequantize_array(int *full_precision_output, float *output,  int array_len, float amax, int bitnum)
+{
+    for (int i = 0; i < array_len; ++i)
+        {
+            output[i] = full_precision_dequantize(full_precision_output[i], amax, bitnum);
         }
 }
 
@@ -106,6 +121,23 @@ float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_
 
     return image[channel_offset + row_offset + col_offset];
 }
+
+int8_t int8_get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, int8_t *image)
+{
+    int im_col = col - pad + kernel_col;
+    int im_row = row - pad + kernel_row;
+    if (im_col < 0 || im_row < 0 || im_col >= image_size || im_row >= image_size)
+    {
+        return 0;
+    }
+    int channel_offset = channel * image_size * image_size;
+    int row_offset = im_row * image_size;
+    int col_offset = im_col;
+
+    return image[channel_offset + row_offset + col_offset];
+}
+
+
 
 void scale_bias(float *output, float *scales, int out_channel, int size_out)
 {
@@ -193,6 +225,10 @@ void activate_array(float *output, int array_len, ACTIVATION a)
     }
 }
 
+void int8_forward_max_layer(layer l, network net){
+
+}
+
 void forward_max_layer(layer l, network net)
 {
     fprintf(stderr, "doing forward maxpool\n");
@@ -233,6 +269,7 @@ void forward_max_layer(layer l, network net)
             }
         }
     }
+    // fprintf(stderr, "forward max finish\n");
 }
 
 int entry_index(layer l, int location, int entry)
@@ -299,10 +336,10 @@ void int8_forward_conv_layer(layer l, network net)
 {
     if (l.type != CONVOLUTION)
     {
-        fprintf(stderr, "non conv layer calls forward_conv_layer\n");
+        fprintf(stderr, "non conv layer calls forward conv layer\n");
         exit(1);
     }
-    fprintf(stderr, "doing forward conv...\n");
+    fprintf(stderr, "doing int8 forward conv...\n");
 
     int pad = l.pad;
     int ksize = l.size;
@@ -313,11 +350,10 @@ void int8_forward_conv_layer(layer l, network net)
 
     // int8_t *int8_input = net.int8_input;
 
-    float *out = l.output;
-
     int8_t *int8_out = l.int8_output;
     int8_t *int8_weights = l.int8_weights;
     int8_t *int8_input = net.int8_input;
+    int *inter_out = l.intermediate_output;
 
 
     int output_channel_offset_kernel;
@@ -357,12 +393,10 @@ void int8_forward_conv_layer(layer l, network net)
                                                          row_offset_kernel +
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
-
-                            // todo: int8_get_input_pixel
-                            int8_t int8_image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, int8_input);
-                            int8_out[col_offset_out +
+                            int8_t int8_image_value = int8_get_input_pixel(r, c, ic, i, j, pad, input_size, int8_input);
+                            inter_out[col_offset_out +
                                 row_offset_out +
-                                output_channel_offset_out] += (int8_kernel_value * int8_image_value);
+                                output_channel_offset_out] += ((int)int8_kernel_value * (int)int8_image_value);
                         }
                     }
                 }
@@ -371,7 +405,7 @@ void int8_forward_conv_layer(layer l, network net)
     }
 
     // dequantize
-    dequantize_array(int8_out, out, l.c * l.n * l.size * l.size, l.amax_w, 8);
+    full_precision_dequantize_array(inter_out, l.output, l.size_out * l.size_out * l.n, l.amax_w, 8);
 
 
     if (l.batch_normalize)
@@ -384,8 +418,11 @@ void int8_forward_conv_layer(layer l, network net)
         add_bias(l.output, l.biases, l.n, l.size_out);
     }
 
+    // fprintf(stderr, "finish batchnorm scale and bias\n");
 
+    quantize_array(l.output, int8_out, l.size_out * l.size_out * l.n, l.amax_out, 8);
 
+    // fprintf(stderr, "finish final quantize\n");
 }
 
 
@@ -461,6 +498,8 @@ void forward_conv_layer(layer l, network net)
         }
     }
 
+    // print_range_array(out, l.size_out*l.size_out*l.n);
+
     if (l.batch_normalize)
     {
         forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
@@ -495,9 +534,9 @@ void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int s
     l->c = num_channel_in;
     l->activation = act;
     l->batch_normalize = batch;
-    // l->workspace_size = l->size_out * l->size_out * l->size * l->size * l->c * sizeof(float);
-
+    
     l->forward = forward_conv_layer;
+    l->int8_forward = int8_forward_conv_layer;
 
     num = l->c * l->n * l->size * l->size;
     l->biases = calloc(l->n, sizeof(float));
@@ -508,6 +547,7 @@ void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int s
 
     l->output = calloc(l->size_out * l->size_out * l->n, sizeof(float));
     l->int8_output = calloc(l->size_out * l->size_out * l->n, sizeof(int8_t));
+    l->intermediate_output = calloc(l->size_out * l->size_out * l->n, sizeof(int));
 
     if (l->batch_normalize)
     {
@@ -631,17 +671,27 @@ void load_conv_weights(layer *l, FILE *fp)
 
     if (l->quantize){
         // quantize weight
-        if(l->index != 14)
+        if (FULL_INT8)
             quantize_array(l->weights, l->int8_weights, num, l->amax_w, 8);
-        else if(l->index == 14)
-            // fully connected layer are quantized to 8bit
-            quantize_array(l->weights, l->int8_weights, num, l->amax_w, 8);
+        else
+            sudo_quantize_array(l->weights, num, l->amax_w, 8);
 
         if (l->batch_normalize)
         {
-            quantize_array(l->rolling_mean, l->int8_rolling_mean, l->n, l->amax_m, 8);
-            quantize_array(l->rolling_variance, l->int8_rolling_variance, l->n, l->amax_var, 8);
-            quantize_array(l->scales, l->int8_scales, l->n, l->amax_scale, 8);
+            if (FULL_INT8) {
+                quantize_array(l->rolling_mean, l->int8_rolling_mean, l->n, l->amax_m, 8);
+                quantize_array(l->rolling_variance, l->int8_rolling_variance, l->n, l->amax_var, 8);
+                quantize_array(l->scales, l->int8_scales, l->n, l->amax_scale, 8);
+                // can omit of full int8 finishes
+                sudo_quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
+                sudo_quantize_array(l->rolling_variance, l->n, l->amax_var, 8);
+                sudo_quantize_array(l->scales, l->n, l->amax_scale, 8);
+            }
+            else{
+                sudo_quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
+                sudo_quantize_array(l->rolling_variance, l->n, l->amax_var, 8);
+                sudo_quantize_array(l->scales, l->n, l->amax_scale, 8);
+            }
         }
     }
 
@@ -751,7 +801,6 @@ void load_weights(network *net, char *weights)
 
 network *make_network()
 {
-    // size_t workspace_size = 0;
     network *net = calloc(1, sizeof(network));
     net->n = LAYERNUM;
     net->layers = calloc(net->n, sizeof(layer));
@@ -787,6 +836,7 @@ network *make_network()
     net->layers[0].amax_m = 1;
     net->layers[0].amax_var = 0.2;
     net->layers[0].amax_scale = 6;
+    net->layers[0].amax_out_raw = 5;
     net->layers[0].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[0]), 0, 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
 
@@ -797,6 +847,7 @@ network *make_network()
     net->layers[2].amax_m = 10;
     net->layers[2].amax_var = 65;
     net->layers[2].amax_scale = 6;
+    net->layers[2].amax_out_raw = 80;
     net->layers[2].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[2]), 2, 32, 3, 1, 1, 16, LEAKY, 1, 208, 208);
 
@@ -807,6 +858,7 @@ network *make_network()
     net->layers[4].amax_m = 5;
     net->layers[4].amax_var = 10;
     net->layers[4].amax_scale = 5;
+    net->layers[4].amax_out_raw = 30;
     net->layers[4].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[4]), 4, 64, 3, 1, 1, 32, LEAKY, 1, 104, 104);
 
@@ -817,6 +869,7 @@ network *make_network()
     net->layers[6].amax_m = 5;
     net->layers[6].amax_var = 10;
     net->layers[6].amax_scale = 5;
+    net->layers[6].amax_out_raw = 25;
     net->layers[6].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[6]), 6, 128, 3, 1, 1, 64, LEAKY, 1, 52, 52);
 
@@ -827,6 +880,7 @@ network *make_network()
     net->layers[8].amax_m = 3;
     net->layers[8].amax_var = 5;
     net->layers[8].amax_scale = 3;
+    net->layers[8].amax_out_raw = 15;
     net->layers[8].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[8]), 8, 256, 3, 1, 1, 128, LEAKY, 1, 26, 26);
 
@@ -837,6 +891,7 @@ network *make_network()
     net->layers[10].amax_m = 2;
     net->layers[10].amax_var = 3;
     net->layers[10].amax_scale = 3;
+    net->layers[10].amax_out_raw = 10;
     net->layers[10].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[10]), 10, 512, 3, 1, 1, 256, LEAKY, 1, 13, 13);
 
@@ -847,6 +902,7 @@ network *make_network()
     net->layers[12].amax_m = 1;
     net->layers[12].amax_var = 3;
     net->layers[12].amax_scale = 10;
+    net->layers[12].amax_out_raw = 5;
     net->layers[12].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[12]), 12, 1024, 3, 1, 1, 512, LEAKY, 1, 13, 13);
 
@@ -855,11 +911,13 @@ network *make_network()
     net->layers[13].amax_m = 3;
     net->layers[13].amax_var = 17;
     net->layers[13].amax_scale = 1;
+    net->layers[13].amax_out_raw = 25;
     net->layers[13].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[13]), 13, 1024, 3, 1, 1, 1024, LEAKY, 1, 13, 13);
 
     net->layers[14].amax_w = 0.25;
     net->layers[14].amax_out = 25;
+    net->layers[14].amax_out_raw = 25;
     net->layers[14].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[14]), 14, 125, 1, 1, 0, 1024, LINEAR, 0, 13, 13);
 
@@ -897,8 +955,6 @@ void free_network(network *net)
         free_layer(&(net->layers[i]));
     }
     free(net->layers);
-
-    // free(net->workspace);
     free(net);
 }
 
