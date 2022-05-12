@@ -1,6 +1,6 @@
 #define QUANTIZE_ENABLE 1
-#define PRINT_OUTPUT 1
-#define PRINT_WEIGHT 1
+#define PRINT_OUTPUT 0
+#define PRINT_WEIGHT 0
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
@@ -9,7 +9,7 @@
 
 #define LAYERNUM 16
 
-#define FULL_INT8 0
+#define FULL_INT8 1
 
 
 typedef struct

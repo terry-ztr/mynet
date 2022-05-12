@@ -396,7 +396,7 @@ void int8_forward_conv_layer(layer l, network net)
                             int8_t int8_image_value = int8_get_input_pixel(r, c, ic, i, j, pad, input_size, int8_input);
                             inter_out[col_offset_out +
                                 row_offset_out +
-                                output_channel_offset_out] += ((int)int8_kernel_value * (int)int8_image_value);
+                                output_channel_offset_out] += (((int)int8_kernel_value) * ((int)int8_image_value));
                         }
                     }
                 }
@@ -405,18 +405,70 @@ void int8_forward_conv_layer(layer l, network net)
     }
 
     // dequantize
-    full_precision_dequantize_array(inter_out, l.output, l.size_out * l.size_out * l.n, l.amax_w, 8);
-
-
+    float input_range;
+    if(l.index==0){
+        input_range = 1;
+    }
+    else{
+        layer prev_l = net.layers[l.index-1];
+        fprintf(stderr, "prev_l index: %d\n", prev_l.index);
+        fprintf(stderr, "prev_l amax_out: %g\n", prev_l.amax_out);
+        input_range = prev_l.amax_out;
+    }
+    full_precision_dequantize_array(inter_out, l.output, l.size_out * l.size_out * l.n, l.amax_w*input_range, 8+8-1);
+    // if(l.index == 0){
+    //     for (int oc = 0; oc < l.n; ++oc)
+    //         {
+    //             fprintf(stderr, "*************** oc: %d ***************\n", oc);
+    //             for (int r = 0; r < 10; ++r)
+    //             {
+    //                 for (int c = 0; c < 10; ++c)
+    //                 {
+    //                     fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+    //                 }
+    //                 fprintf(stderr, "\n");
+    //             }
+    //         }
+    // }
     if (l.batch_normalize)
     {
         //todo change function to int8
         forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
         //todo change function to int8
         scale_bias(l.output, l.scales, l.n, l.size_out);
+        fprintf(stderr,"after scale\n");
+        if(l.index == 0){
+            for (int oc = 0; oc < l.n; ++oc)
+            {
+                fprintf(stderr, "*************** oc: %d ***************\n", oc);
+                for (int r = 0; r < 10; ++r)
+                {
+                    for (int c = 0; c < 10; ++c)
+                    {
+                        fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
         //todo change function to int8
         add_bias(l.output, l.biases, l.n, l.size_out);
     }
+
+    // if(l.index == 0){
+    //     for (int oc = 0; oc < l.n; ++oc)
+    //     {
+    //         fprintf(stderr, "*************** oc: %d ***************\n", oc);
+    //         for (int r = 0; r < 10; ++r)
+    //         {
+    //             for (int c = 0; c < 10; ++c)
+    //             {
+    //                 fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+    //             }
+    //             fprintf(stderr, "\n");
+    //         }
+    //     }
+    // }
 
     // fprintf(stderr, "finish batchnorm scale and bias\n");
 
@@ -497,6 +549,20 @@ void forward_conv_layer(layer l, network net)
             }
         }
     }
+    // if(l.index == 0){
+    //     for (int oc = 0; oc < l.n; ++oc)
+    //         {
+    //             fprintf(stderr, "*************** oc: %d ***************\n", oc);
+    //             for (int r = 0; r < 10; ++r)
+    //             {
+    //                 for (int c = 0; c < 10; ++c)
+    //                 {
+    //                     fprintf(stderr, "%g, ", out[oc * l.size_out * l.size_out + r * l.size_out + c]);
+    //                 }
+    //                 fprintf(stderr, "\n");
+    //             }
+    //         }
+    // }
 
     // print_range_array(out, l.size_out*l.size_out*l.n);
 
@@ -504,6 +570,21 @@ void forward_conv_layer(layer l, network net)
     {
         forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
         scale_bias(l.output, l.scales, l.n, l.size_out);
+        fprintf(stderr,"after scales\n");
+        if(l.index == 0){
+        for (int oc = 0; oc < l.n; ++oc)
+            {
+                fprintf(stderr, "*************** oc: %d ***************\n", oc);
+                for (int r = 0; r < 10; ++r)
+                {
+                    for (int c = 0; c < 10; ++c)
+                    {
+                        fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
         add_bias(l.output, l.biases, l.n, l.size_out);
     }
     else
@@ -840,6 +921,7 @@ network *make_network()
     net->layers[0].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[0]), 0, 16, 3, 1, 1, 3, LEAKY, 1, 416, 416);
 
+    net->layers[1].amax_out = 60;
     make_maxpool_layer(&(net->layers[1]), 1, 16, 2, 2, 1, 16, 416, 208);
 
     net->layers[2].amax_w = 1;
@@ -851,6 +933,7 @@ network *make_network()
     net->layers[2].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[2]), 2, 32, 3, 1, 1, 16, LEAKY, 1, 208, 208);
 
+    net->layers[3].amax_out = 30; 
     make_maxpool_layer(&(net->layers[3]), 3, 32, 2, 2, 1, 32, 208, 104);
 
     net->layers[4].amax_w = 1;
@@ -862,6 +945,7 @@ network *make_network()
     net->layers[4].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[4]), 4, 64, 3, 1, 1, 32, LEAKY, 1, 104, 104);
 
+    net->layers[5].amax_out = 20;
     make_maxpool_layer(&(net->layers[5]), 5, 64, 2, 2, 1, 64, 104, 52);
 
     net->layers[6].amax_w = 0.6;
@@ -873,6 +957,7 @@ network *make_network()
     net->layers[6].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[6]), 6, 128, 3, 1, 1, 64, LEAKY, 1, 52, 52);
 
+    net->layers[7].amax_out = 20;
     make_maxpool_layer(&(net->layers[7]), 7, 128, 2, 2, 1, 128, 52, 26);
 
     net->layers[8].amax_w = 0.5;
@@ -884,6 +969,7 @@ network *make_network()
     net->layers[8].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[8]), 8, 256, 3, 1, 1, 128, LEAKY, 1, 26, 26);
 
+    net->layers[9].amax_out = 15;
     make_maxpool_layer(&(net->layers[9]), 9, 256, 2, 2, 1, 256, 26, 13);
 
     net->layers[10].amax_w = 0.4;
@@ -895,6 +981,7 @@ network *make_network()
     net->layers[10].quantize = QUANTIZE_ENABLE;
     make_conv_layer(&(net->layers[10]), 10, 512, 3, 1, 1, 256, LEAKY, 1, 13, 13);
 
+    net->layers[11].amax_out = 11;
     make_maxpool_layer(&(net->layers[11]), 11, 512, 2, 1, 1, 512, 13, 13);
 
     net->layers[12].amax_w = 0.12;
