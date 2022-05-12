@@ -158,6 +158,9 @@ image **load_alphabet()
 
 int main(int argc, char **argv)
 {
+    // float y = int8_quantize(0.228, 0.06, 8);
+    // fprintf(stderr, "y: %f\n", y);
+    // return 0;
     if (argc < 2)
     {
         fprintf(stderr, "usage: give a filename\n");
@@ -281,9 +284,10 @@ int main(int argc, char **argv)
     {
         for (int i = 0; i < net->n; ++i)
         {
+            layer l = net->layers[i];
             char fp32_file[50], int8_file[50], sufix[10], num[10];
-            strcpy(fp32_file, "./test_output/fp32_output_layer_");
-            strcpy(int8_file, "./test_output/int8_output_layer_");
+            strcpy(fp32_file, "../test_output/fp32_output_layer_");
+            strcpy(int8_file, "../test_output/int8_output_layer_");
             strcpy(sufix, ".txt");
             sprintf(num, "%d", l.index);
             strcat(fp32_file, num);
@@ -292,7 +296,7 @@ int main(int argc, char **argv)
             strcat(int8_file, sufix);
 
             FILE *output_fp;
-            if(l.quantize)
+            if(QUANTIZE_ENABLE)
                 output_fp= fopen(int8_file, "w");
             else
                 output_fp = fopen(fp32_file, "w");
@@ -326,8 +330,8 @@ int main(int argc, char **argv)
                 continue;
 
             char fp32_file[50], int8_file[50], sufix[10], num[10];
-            strcpy(fp32_file, "./test_weights/fp32_weight_layer_");
-            strcpy(int8_file, "./test_weights/int8_weight_layer_");
+            strcpy(fp32_file, "../test_weights/fp32_weight_layer_");
+            strcpy(int8_file, "../test_weights/int8_weight_layer_");
             strcpy(sufix, ".txt");
             sprintf(num, "%d", l.index);
             strcat(fp32_file, num);

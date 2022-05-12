@@ -151,3 +151,5 @@ image load_image_color(char *filename, int w, int h);
 float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_col, int pad, int image_size, float *image);
 
 float quantize(float x, float amax, int bitnum);
+
+float int8_quantize(float x, float amax, int bitnum);

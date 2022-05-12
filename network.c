@@ -7,6 +7,32 @@
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
+float int8_dequantize(float x, float amax, int bitnum){
+    return 0;
+}
+
+float int8_quantize(float x, float amax, int bitnum)
+{
+    int8_t xq;
+    int out_max;
+    int out_min; 
+    int tmp;
+    float x_dq;
+
+    out_max = (pow(2, (bitnum - 1))-1);
+    out_min = (-(pow(2, (bitnum - 1))));
+    // fprintf(stderr, "out_max = %" PRIi8 "\n", out_max);
+    // float scale = 2*amax/pow(2, bitnum);
+    tmp = round(x * out_max / amax);
+    tmp = (tmp > out_max) ? out_max : tmp;
+    tmp = (tmp < out_min) ? out_min : tmp;
+    xq =  (int8_t) tmp;
+    // fprintf(stderr, "quantized x = %" PRIi8 "\n", xq);
+    x_dq = xq / (float)out_max * amax;
+    // fprintf(stderr, "dq x = %g\n", x_dq);
+    return x_dq;
+}
+
 float quantize(float x, float amax, int bitnum)
 {
     int xq;
@@ -144,7 +170,7 @@ void activate_array(float *output, int array_len, ACTIVATION a)
 void quantize_array(float *output, int array_len, float amax, int bitnum){
     for (int i = 0; i < array_len; ++i)
         {
-            output[i] = quantize(output[i], amax, bitnum);
+            output[i] = int8_quantize(output[i], amax, bitnum);
         }
 }
 
@@ -500,9 +526,9 @@ void load_conv_weights(layer *l, FILE *fp)
 
         if (l->batch_normalize)
         {
-            quantize_array(l->rolling_mean, l->n, l->amax_m, 16);
-            quantize_array(l->rolling_variance, l->n, l->amax_var, 16);
-            quantize_array(l->scales, l->n, l->amax_scale, 16);
+            quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
+            quantize_array(l->rolling_variance, l->n, l->amax_var, 8);
+            quantize_array(l->scales, l->n, l->amax_scale, 8);
         }
     }
 
