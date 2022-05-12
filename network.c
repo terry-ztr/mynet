@@ -9,7 +9,8 @@
 
 float quantize(float x, float amax, int bitnum)
 {
-    int xq, out_max;
+    int xq;
+    int out_max;
     float x_dq;
 
     out_max = pow(2, (bitnum - 1));
@@ -17,6 +18,7 @@ float quantize(float x, float amax, int bitnum)
     xq = round(x * out_max / amax);
     xq = (xq > out_max) ? out_max : xq;
     xq = (xq < -out_max) ? -out_max : xq;
+
     x_dq = xq / (float)out_max * amax;
     return x_dq;
 }
