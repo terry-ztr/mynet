@@ -7,11 +7,14 @@
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
-float int8_dequantize(float x, float amax, int bitnum){
-    return 0;
+float int8_dequantize(int8_t xq, float amax, int bitnum)
+{
+    int out_max = (pow(2, (bitnum - 1))-1);
+    float x_dq = xq / (float)out_max * amax;
+    return x_dq;
 }
 
-float int8_quantize(float x, float amax, int bitnum)
+int8_t int8_quantize(float x, float amax, int bitnum)
 {
     int8_t xq;
     int out_max;
@@ -30,7 +33,7 @@ float int8_quantize(float x, float amax, int bitnum)
     // fprintf(stderr, "quantized x = %" PRIi8 "\n", xq);
     x_dq = xq / (float)out_max * amax;
     // fprintf(stderr, "dq x = %g\n", x_dq);
-    return x_dq;
+    return xq;
 }
 
 float quantize(float x, float amax, int bitnum)
@@ -47,6 +50,30 @@ float quantize(float x, float amax, int bitnum)
 
     x_dq = xq / (float)out_max * amax;
     return x_dq;
+}
+
+void quantize_array(float *output, int8_t *int8_output, int array_len, float amax, int bitnum)
+{
+    for (int i = 0; i < array_len; ++i)
+        {
+            int8_output[i] = int8_quantize(output[i], amax, bitnum);
+        }
+}
+
+void sudo_quantize_array(float *output, int array_len, float amax, int bitnum)
+{
+    for (int i = 0; i < array_len; ++i)
+        {
+            output[i] = quantize(output[i], amax, bitnum);
+        }
+}
+
+void dequantize_array(int8_t *int8_output, float *output,  int array_len, float amax, int bitnum)
+{
+    for (int i = 0; i < array_len; ++i)
+        {
+            output[i] = int8_quantize(int8_output[i], amax, bitnum);
+        }
 }
 
 void print_range_array(float *output, int array_len){
@@ -166,14 +193,6 @@ void activate_array(float *output, int array_len, ACTIVATION a)
     }
 }
 
-// todo:
-void quantize_array(float *output, int array_len, float amax, int bitnum){
-    for (int i = 0; i < array_len; ++i)
-        {
-            output[i] = int8_quantize(output[i], amax, bitnum);
-        }
-}
-
 void forward_max_layer(layer l, network net)
 {
     fprintf(stderr, "doing forward maxpool\n");
@@ -276,6 +295,100 @@ void forward_region_layer(layer l, network net)
     softmax_cpu(net.input + index, l.classes, l.num, size_in * size_in * l.c / l.num, size_in * size_in, 1, size_in * size_in, 1, l.output + index);
 }
 
+void int8_forward_conv_layer(layer l, network net)
+{
+    if (l.type != CONVOLUTION)
+    {
+        fprintf(stderr, "non conv layer calls forward_conv_layer\n");
+        exit(1);
+    }
+    fprintf(stderr, "doing forward conv...\n");
+
+    int pad = l.pad;
+    int ksize = l.size;
+    int input_size = l.size_in;
+    int input_channel = l.c;
+    int output_size = l.size_out;
+    int output_channel = l.n;
+
+    // int8_t *int8_input = net.int8_input;
+
+    float *out = l.output;
+
+    int8_t *int8_out = l.int8_output;
+    int8_t *int8_weights = l.int8_weights;
+    int8_t *int8_input = net.int8_input;
+
+
+    int output_channel_offset_kernel;
+    int input_channel_offset_kernel;
+    int row_offset_kernel;
+    int col_offset_kernel;
+
+    int output_channel_offset_out;
+    int row_offset_out;
+    int col_offset_out;
+
+    for (int oc = 0; oc < output_channel; ++oc)
+    {
+        output_channel_offset_kernel = oc * ksize * ksize * input_channel;
+        output_channel_offset_out = oc * output_size * output_size;
+        // for each input channel
+        for (int ic = 0; ic < input_channel; ++ic)
+        {
+            input_channel_offset_kernel = ic * ksize * ksize;
+            // for each row
+            for (int r = 0; r < output_size; ++r)
+            {
+                row_offset_out = r * output_size;
+                // for each col
+                for (int c = 0; c < output_size; ++c)
+                {
+                    col_offset_out = c;
+                    // for row in kernel
+                    for (int i = 0; i < ksize; ++i)
+                    {
+                        row_offset_kernel = i * ksize;
+                        // for col in kernel
+                        for (int j = 0; j < ksize; ++j)
+                        {
+                            col_offset_kernel = j;
+                            int8_t int8_kernel_value = int8_weights[col_offset_kernel +
+                                                         row_offset_kernel +
+                                                         input_channel_offset_kernel +
+                                                         output_channel_offset_kernel];
+
+                            // todo: int8_get_input_pixel
+                            int8_t int8_image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, int8_input);
+                            int8_out[col_offset_out +
+                                row_offset_out +
+                                output_channel_offset_out] += (int8_kernel_value * int8_image_value);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // dequantize
+    dequantize_array(int8_out, out, l.c * l.n * l.size * l.size, l.amax_w, 8);
+
+
+    if (l.batch_normalize)
+    {
+        //todo change function to int8
+        forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
+        //todo change function to int8
+        scale_bias(l.output, l.scales, l.n, l.size_out);
+        //todo change function to int8
+        add_bias(l.output, l.biases, l.n, l.size_out);
+    }
+
+
+
+}
+
+
 void forward_conv_layer(layer l, network net)
 {
     if (l.type != CONVOLUTION)
@@ -291,9 +404,11 @@ void forward_conv_layer(layer l, network net)
     int input_channel = l.c;
     int output_size = l.size_out;
     int output_channel = l.n;
+
     float *out = l.output;
     float *weights = l.weights;
     float *input = net.input;
+
 
     int output_channel_offset_kernel;
     int input_channel_offset_kernel;
@@ -335,25 +450,6 @@ void forward_conv_layer(layer l, network net)
                                                          row_offset_kernel +
                                                          input_channel_offset_kernel +
                                                          output_channel_offset_kernel];
-                            // if (l.index == 0)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 2)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 4)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 6)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 8)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 10)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 12)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 13)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-                            // else if (l.index == 14)
-                            //     kernel_value = quantize(kernel_value, l.amax, 8);
-
                             float image_value = get_input_pixel(r, c, ic, i, j, pad, input_size, input);
                             out[col_offset_out +
                                 row_offset_out +
@@ -381,7 +477,7 @@ void forward_conv_layer(layer l, network net)
         print_range_array(l.output, l.size_out * l.size_out * l.n);
     }
     if(l.quantize)
-        quantize_array(l.output, l.size_out * l.size_out * l.n, l.amax_out, 8);
+        sudo_quantize_array(l.output, l.size_out * l.size_out * l.n, l.amax_out, 8);
 }
 
 void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int stride, int pad,
@@ -406,13 +502,22 @@ void make_conv_layer(layer *l, int index, int num_kernel, int kernel_size, int s
     num = l->c * l->n * l->size * l->size;
     l->biases = calloc(l->n, sizeof(float));
     l->weights = calloc(num, sizeof(float));
+
+    l->int8_biases = calloc(l->n, sizeof(int8_t));
+    l->int8_weights = calloc(num, sizeof(int8_t));
+
     l->output = calloc(l->size_out * l->size_out * l->n, sizeof(float));
+    l->int8_output = calloc(l->size_out * l->size_out * l->n, sizeof(int8_t));
 
     if (l->batch_normalize)
     {
         l->scales = calloc(l->n, sizeof(float));
         l->rolling_mean = calloc(l->n, sizeof(float));
         l->rolling_variance = calloc(l->n, sizeof(float));
+
+        l->int8_scales = calloc(l->n, sizeof(int8_t));
+        l->int8_rolling_mean = calloc(l->n, sizeof(int8_t));
+        l->int8_rolling_variance = calloc(l->n, sizeof(int8_t));
     }
 
 }
@@ -431,6 +536,8 @@ void make_maxpool_layer(layer *l, int index, int num_channel_out, int kernel_siz
     l->c = num_channel_in;
     l->forward = forward_max_layer;
     l->output = calloc(l->size_out * l->size_out * l->n, sizeof(float));
+    l->int8_output = calloc(l->size_out * l->size_out * l->n, sizeof(int8_t));
+
 }
 
 void make_region_layer(layer *l, int index, float thresh, int num, int size_in, int classes, int coords)
@@ -474,11 +581,17 @@ void free_conv_layer(layer *l)
     free(l->biases);
     free(l->weights);
     free(l->output);
+    free(l->int8_biases);
+    free(l->int8_weights);
+    free(l->int8_output);
     if (l->batch_normalize)
     {
         free(l->scales);
         free(l->rolling_mean);
         free(l->rolling_variance);
+        free(l->int8_scales);
+        free(l->int8_rolling_mean);
+        free(l->int8_rolling_variance);
     }
 }
 
@@ -519,16 +632,16 @@ void load_conv_weights(layer *l, FILE *fp)
     if (l->quantize){
         // quantize weight
         if(l->index != 14)
-            quantize_array(l->weights, num, l->amax_w, 8);
+            quantize_array(l->weights, l->int8_weights, num, l->amax_w, 8);
         else if(l->index == 14)
             // fully connected layer are quantized to 8bit
-            quantize_array(l->weights, num, l->amax_w, 8);
+            quantize_array(l->weights, l->int8_weights, num, l->amax_w, 8);
 
         if (l->batch_normalize)
         {
-            quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
-            quantize_array(l->rolling_variance, l->n, l->amax_var, 8);
-            quantize_array(l->scales, l->n, l->amax_scale, 8);
+            quantize_array(l->rolling_mean, l->int8_rolling_mean, l->n, l->amax_m, 8);
+            quantize_array(l->rolling_variance, l->int8_rolling_variance, l->n, l->amax_var, 8);
+            quantize_array(l->scales, l->int8_scales, l->n, l->amax_scale, 8);
         }
     }
 
@@ -784,6 +897,7 @@ void free_network(network *net)
         free_layer(&(net->layers[i]));
     }
     free(net->layers);
+
     // free(net->workspace);
     free(net);
 }

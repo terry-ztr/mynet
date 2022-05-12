@@ -1,6 +1,6 @@
 #define QUANTIZE_ENABLE 1
-#define PRINT_OUTPUT 1
-#define PRINT_WEIGHT 1
+#define PRINT_OUTPUT 0
+#define PRINT_WEIGHT 0
 #define FIND_RANGE 0
 #define FIND_OUT_RANGE 0
 
@@ -101,6 +101,14 @@ struct layer{
     float *rolling_mean;
     float *rolling_variance;
     float *output;
+    
+    int8_t *int8_weights;
+    int8_t *int8_biases;
+    int8_t *int8_scales;
+    int8_t *int8_rolling_mean;
+    int8_t *int8_rolling_variance;
+    int8_t *int8_output;
+
     void (*forward)   (struct layer, struct network);
 };
 
@@ -113,6 +121,8 @@ typedef struct network{
     int index;
     float *output;
     float *input;
+    int8_t *int8_output;
+    int8_t *int8_input;
     float *workspace;
 } network;
 
@@ -152,4 +162,4 @@ float get_input_pixel(int row, int col, int channel, int kernel_row, int kernel_
 
 float quantize(float x, float amax, int bitnum);
 
-float int8_quantize(float x, float amax, int bitnum);
+int8_t int8_quantize(float x, float amax, int bitnum);
