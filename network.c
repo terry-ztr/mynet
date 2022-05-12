@@ -137,6 +137,23 @@ int8_t int8_get_input_pixel(int row, int col, int channel, int kernel_row, int k
     return image[channel_offset + row_offset + col_offset];
 }
 
+void int8_scale_bias(int *output, int8_t *scales, int out_channel, int size_out)
+{
+    for (int oc = 0; oc < out_channel; ++oc)
+    {
+        int channel_offset = oc * size_out * size_out;
+        for (int r = 0; r < size_out; ++r)
+        {
+            int row_offset = r * size_out;
+            for (int c = 0; c < size_out; ++c)
+            {
+                int col_offset = c;
+                output[channel_offset + row_offset + col_offset] *= (int) scales[oc];
+            }
+        }
+    }
+}
+
 
 
 void scale_bias(float *output, float *scales, int out_channel, int size_out)
@@ -156,6 +173,23 @@ void scale_bias(float *output, float *scales, int out_channel, int size_out)
     }
 }
 
+void int8_add_bias(int *output, int8_t *biases, int out_channel, int size_out)
+{
+    for (int oc = 0; oc < out_channel; ++oc)
+    {
+        int channel_offset = oc * size_out * size_out;
+        for (int r = 0; r < size_out; ++r)
+        {
+            int row_offset = r * size_out;
+            for (int c = 0; c < size_out; ++c)
+            {
+                int col_offset = c;
+                output[channel_offset + row_offset + col_offset] += (int)biases[oc];
+            }
+        }
+    }
+}
+
 void add_bias(float *output, float *biases, int out_channel, int size_out)
 {
     for (int oc = 0; oc < out_channel; ++oc)
@@ -168,6 +202,25 @@ void add_bias(float *output, float *biases, int out_channel, int size_out)
             {
                 int col_offset = c;
                 output[channel_offset + row_offset + col_offset] += biases[oc];
+            }
+        }
+    }
+}
+
+void int8_forward_batchnorm(int *output, int8_t *rolling_mean, int8_t *rolling_variance, int out_channel, int size_out)
+{
+    fprintf(stderr, "doing int8 forward batchnorm\n");
+    for (int oc = 0; oc < out_channel; ++oc)
+    {
+        int channel_offset = oc * size_out * size_out;
+        for (int r = 0; r < size_out; ++r)
+        {
+            int row_offset = r * size_out;
+            for (int c = 0; c < size_out; ++c)
+            {
+                int col_offset = c;
+                int index = col_offset + row_offset + channel_offset;
+                output[index] = (output[index] - (int)rolling_mean[oc]) / (sqrt((float)rolling_variance[oc]) + .000001f);
             }
         }
     }
@@ -365,6 +418,7 @@ void int8_forward_conv_layer(layer l, network net)
     int row_offset_out;
     int col_offset_out;
 
+    // convolution
     for (int oc = 0; oc < output_channel; ++oc)
     {
         output_channel_offset_kernel = oc * ksize * ksize * input_channel;
@@ -411,67 +465,21 @@ void int8_forward_conv_layer(layer l, network net)
     }
     else{
         layer prev_l = net.layers[l.index-1];
-        fprintf(stderr, "prev_l index: %d\n", prev_l.index);
-        fprintf(stderr, "prev_l amax_out: %g\n", prev_l.amax_out);
         input_range = prev_l.amax_out;
     }
-    full_precision_dequantize_array(inter_out, l.output, l.size_out * l.size_out * l.n, l.amax_w*input_range, 8+8-1);
-    // if(l.index == 0){
-    //     for (int oc = 0; oc < l.n; ++oc)
-    //         {
-    //             fprintf(stderr, "*************** oc: %d ***************\n", oc);
-    //             for (int r = 0; r < 10; ++r)
-    //             {
-    //                 for (int c = 0; c < 10; ++c)
-    //                 {
-    //                     fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
-    //                 }
-    //                 fprintf(stderr, "\n");
-    //             }
-    //         }
-    // }
+
     if (l.batch_normalize)
     {
         //todo change function to int8
-        forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
+        int8_forward_batchnorm(inter_out, l.int8_rolling_mean, l.int8_rolling_variance, l.n, l.size_out);
         //todo change function to int8
-        scale_bias(l.output, l.scales, l.n, l.size_out);
-        fprintf(stderr,"after scale\n");
-        if(l.index == 0){
-            for (int oc = 0; oc < l.n; ++oc)
-            {
-                fprintf(stderr, "*************** oc: %d ***************\n", oc);
-                for (int r = 0; r < 10; ++r)
-                {
-                    for (int c = 0; c < 10; ++c)
-                    {
-                        fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
-                    }
-                    fprintf(stderr, "\n");
-                }
-            }
-        }
+        int8_scale_bias(inter_out, l.int8_scales, l.n, l.size_out);
         //todo change function to int8
-        add_bias(l.output, l.biases, l.n, l.size_out);
+        int8_add_bias(inter_out, l.int8_biases, l.n, l.size_out);
     }
 
-    // if(l.index == 0){
-    //     for (int oc = 0; oc < l.n; ++oc)
-    //     {
-    //         fprintf(stderr, "*************** oc: %d ***************\n", oc);
-    //         for (int r = 0; r < 10; ++r)
-    //         {
-    //             for (int c = 0; c < 10; ++c)
-    //             {
-    //                 fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
-    //             }
-    //             fprintf(stderr, "\n");
-    //         }
-    //     }
-    // }
-
-    // fprintf(stderr, "finish batchnorm scale and bias\n");
-
+    full_precision_dequantize_array(inter_out, l.output, l.size_out * l.size_out * l.n, l.amax_w*input_range, 8+8-1);
+   
     quantize_array(l.output, int8_out, l.size_out * l.size_out * l.n, l.amax_out, 8);
 
     // fprintf(stderr, "finish final quantize\n");
@@ -763,10 +771,6 @@ void load_conv_weights(layer *l, FILE *fp)
                 quantize_array(l->rolling_mean, l->int8_rolling_mean, l->n, l->amax_m, 8);
                 quantize_array(l->rolling_variance, l->int8_rolling_variance, l->n, l->amax_var, 8);
                 quantize_array(l->scales, l->int8_scales, l->n, l->amax_scale, 8);
-                // can omit of full int8 finishes
-                sudo_quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
-                sudo_quantize_array(l->rolling_variance, l->n, l->amax_var, 8);
-                sudo_quantize_array(l->scales, l->n, l->amax_scale, 8);
             }
             else{
                 sudo_quantize_array(l->rolling_mean, l->n, l->amax_m, 8);
