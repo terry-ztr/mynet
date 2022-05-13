@@ -111,26 +111,7 @@ reg over;
 
 always@(posedge clk or negedge rst_n)
 begin
-    if(!rst_n)
-    begin
-     line_buffer[0] <= 13'd0;
-     line_buffer[1] <= 13'd0;
-     line_buffer[2] <= 13'd0;
-     line_buffer[3] <= 13'd0;
-     line_buffer[4] <= 13'd0;
-     line_buffer[5] <= 13'd0;
-     line_buffer[6] <= 13'd0;
-     line_buffer[7] <= 13'd0;
-     line_buffer[8] <= 13'd0;
-     line_buffer[9] <= 13'd0;
-     line_buffer[10] <= 13'd0;
-     line_buffer[11] <= 13'd0;
-     line_buffer[12] <= 13'd0;
-     line_buffer[13] <= 13'd0;
-     line_buffer[14] <= 13'd0;
-     line_buffer[15] <= 13'd0;
-    end
-    else if(start)
+    if(start)
      line_buffer[pointer] <= line_buffer[pointer] + partial_result;
 end 
 
@@ -185,11 +166,6 @@ begin
    else if((over_counter == 2*ITERATION_TIMES) & fire)
       over_counter <= 8'd0;
 end
-
-
-
-
-
 
 
 reg signed[12:0] data_in;
