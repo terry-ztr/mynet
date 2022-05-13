@@ -48,7 +48,6 @@ float quantize(float x, float amax, int bitnum)
     int xq;
     int out_max;
     float x_dq;
-
     out_max = pow(2, (bitnum - 1));
     // float scale = 2*amax/pow(2, bitnum);
     xq = round(x * out_max / amax);
@@ -208,8 +207,8 @@ void add_bias(float *output, float *biases, int out_channel, int size_out)
 }
 
 void int8_forward_batchnorm(int *output, int8_t *rolling_mean, int8_t *rolling_variance, int out_channel, int size_out)
-{
-    fprintf(stderr, "doing int8 forward batchnorm\n");
+{ 
+    fprintf(stderr, "doing forward batchnorm\n");
     for (int oc = 0; oc < out_channel; ++oc)
     {
         int channel_offset = oc * size_out * size_out;
@@ -278,13 +277,9 @@ void activate_array(float *output, int array_len, ACTIVATION a)
     }
 }
 
-void int8_forward_max_layer(layer l, network net){
-
-}
-
-void forward_max_layer(layer l, network net)
+void int8_forward_max_layer(layer l, network net)
 {
-    fprintf(stderr, "doing forward maxpool\n");
+    fprintf(stderr, "doing int8 forward maxpool\n");
     int size_out = l.size_out;
     int input_channel = l.c;
     int filter_size = l.size;
@@ -313,7 +308,7 @@ void forward_max_layer(layer l, network net)
                         int w_input = c * stride + w;
                         int index_in = w_input + h_input * size_in + channel_offset_in;
                         int valid = (h_input >= 0 && h_input < size_in &&
-                                     w_input >= 0 && w_input < size_in);
+                                        w_input >= 0 && w_input < size_in);
                         float input_val = (valid != 0) ? net.input[index_in] : -FLT_MAX;
                         max = (input_val > max) ? input_val : max;
                     }
@@ -322,6 +317,49 @@ void forward_max_layer(layer l, network net)
             }
         }
     }
+    // fprintf(stderr, "forward max finish\n");
+}
+
+void forward_max_layer(layer l, network net)
+{
+    fprintf(stderr, "doing forward maxpool\n");
+    int size_out = l.size_out;
+    int input_channel = l.c;
+    int filter_size = l.size;
+    int size_in = l.size_in;
+    int stride = l.stride;
+
+for (int ic = 0; ic < input_channel; ++ic)
+{
+    int channel_offset_out = ic * size_out * size_out;
+    int channel_offset_in = ic * size_in * size_in;
+    for (int r = 0; r < size_out; ++r)
+    {
+        int row_offset = r * size_out;
+        for (int c = 0; c < size_out; ++c)
+        {
+            int col_offset = c;
+            int out_index = col_offset + row_offset + channel_offset_out;
+            float max = -FLT_MAX;
+            // for each row in filter
+            for (int h = 0; h < filter_size; ++h)
+            {
+                int h_input = r * stride + h;
+                // for each col in filter
+                for (int w = 0; w < filter_size; ++w)
+                {
+                    int w_input = c * stride + w;
+                    int index_in = w_input + h_input * size_in + channel_offset_in;
+                    int valid = (h_input >= 0 && h_input < size_in &&
+                                    w_input >= 0 && w_input < size_in);
+                    float input_val = (valid != 0) ? net.input[index_in] : -FLT_MAX;
+                    max = (input_val > max) ? input_val : max;
+                }
+            }
+            l.output[out_index] = max;
+        }
+    }
+}
     // fprintf(stderr, "forward max finish\n");
 }
 
@@ -578,21 +616,6 @@ void forward_conv_layer(layer l, network net)
     {
         forward_batchnorm(l.output, l.rolling_mean, l.rolling_variance, l.n, l.size_out);
         scale_bias(l.output, l.scales, l.n, l.size_out);
-        fprintf(stderr,"after scales\n");
-        if(l.index == 0){
-        for (int oc = 0; oc < l.n; ++oc)
-            {
-                fprintf(stderr, "*************** oc: %d ***************\n", oc);
-                for (int r = 0; r < 10; ++r)
-                {
-                    for (int c = 0; c < 10; ++c)
-                    {
-                        fprintf(stderr, "%g, ", l.output[oc * l.size_out * l.size_out + r * l.size_out + c]);
-                    }
-                    fprintf(stderr, "\n");
-                }
-            }
-        }
         add_bias(l.output, l.biases, l.n, l.size_out);
     }
     else
